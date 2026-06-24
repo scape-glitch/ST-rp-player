@@ -2514,26 +2514,24 @@
 
       render();
 
-      $j(document).on('click', '#extensions_button, #chat_actions_button', function () {
-        setTimeout(function() {
-          const targetMenu = $j('#extensions_popup .list-group, #chat_actions_popup .list-group').first();
-          if (targetMenu.length > 0 && $j('#rp-player-toggle-btn').length === 0) {
-            const toggleBtn = $j('<div id="rp-player-toggle-btn" class="list-group-item interactive extensions_menu_item" tabindex="0" title="Показать/скрыть виджет музыки">🎵 RP Music Player</div>');
-            toggleBtn.on('click', function () {
-              if (root.style.display === 'none') {
-                root.style.display = 'flex';
-                $j('#rp_player_show_toggle').prop('checked', true);
-              } else {
-                root.style.display = 'none';
-                $j('#rp_player_show_toggle').prop('checked', false);
-              }
-              $j('#extensions_popup, #chat_actions_popup').hide(); 
-            });
-            targetMenu.append(toggleBtn);
+      const wandMenu = $j('#chat_actions_popup .list-group');
+      if (wandMenu.length > 0 && $j('#rp-player-toggle-btn').length === 0) {
+        const toggleBtn = $j('<div id="rp-player-toggle-btn" class="list-group-item interactive extensions_menu_item" tabindex="0" title="Показать/скрыть виджет музыки">🎵 RP Music Player</div>');
+        
+        toggleBtn.on('click', function () {
+          if (root.style.display === 'none') {
+            root.style.display = 'flex';
+            $j('#rp_player_show_toggle').prop('checked', true);
+          } else {
+            root.style.display = 'none';
+            $j('#rp_player_show_toggle').prop('checked', false);
           }
-        }, 50);
-      });
-
+          $j('#chat_actions_popup').hide(); 
+        });
+        
+        wandMenu.append(toggleBtn);
+      }
+      
       if ($j('#rp-player-extension-settings').length === 0) {
         const extHtml = `
           <div class="inline-drawer" id="rp-player-extension-settings">
