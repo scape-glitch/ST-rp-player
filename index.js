@@ -2514,17 +2514,28 @@
 
       render();
 
-      if ($j('#rp-player-toggle-btn').length === 0) {
-        const toggleBtn = $j('<div id="rp-player-toggle-btn" class="list-group-item">🎵 Открыть/Скрыть RP Плеер</div>');
-        toggleBtn.on('click', function () {
-          if (root.style.display === 'none') {
-            root.style.display = 'flex';
-          } else {
-            root.style.display = 'none';
+      setTimeout(() => {
+        if ($j('#rp-player-toggle-btn').length === 0) {
+          const targetMenu = $j('#extensions_popup, #chat_actions').first();
+          
+          if (targetMenu.length > 0) {
+            const toggleBtn = $j('<div id="rp-player-toggle-btn" class="list-group-item extensions_menu_item">🎵 Открыть/Скрыть RP Плеер</div>');
+            toggleBtn.css({ 'cursor': 'pointer', 'padding': '10px' });
+            
+            toggleBtn.on('click', function () {
+              if (root.style.display === 'none') {
+                root.style.display = 'flex';
+                $j('#rp_player_show_toggle').prop('checked', true); 
+              } else {
+                root.style.display = 'none';
+                $j('#rp_player_show_toggle').prop('checked', false);
+              }
+            });
+            
+            targetMenu.append(toggleBtn);
           }
-        });
-        $j('#chat_actions').append(toggleBtn);
-      }
+        }
+      }, 2000); 
 
       if ($j('#rp-player-extension-settings').length === 0) {
         const extHtml = `
