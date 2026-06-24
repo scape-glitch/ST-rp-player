@@ -2512,23 +2512,31 @@
         if (isYtTrack(t)) { ytCurrentEmbed = ytEmbedSrc(t); isPlaying = false; }
       }
 
-      render();
+            render();
 
-      const wandMenu = $j('#chat_actions_popup .list-group');
-      if (wandMenu.length > 0 && $j('#rp-player-wand-btn').length === 0) {
-        const wandBtn = $j('<div id="rp-player-wand-btn" class="list-group-item interactive extensions_menu_item" tabindex="0">🎵 RP Music Player</div>');
-        wandBtn.on('click', function () {
-          if (root.style.display === 'none') {
-            root.style.display = 'flex';
-            $j('#rp_player_show_toggle').prop('checked', true);
-          } else {
-            root.style.display = 'none';
-            $j('#rp_player_show_toggle').prop('checked', false);
-          }
-          $j('#chat_actions_popup').hide();
-        });
-        wandMenu.append(wandBtn);
-      }
+      setInterval(function () {
+        const wandMenu = $j('#extensionsMenu');
+        if (wandMenu.length > 0 && $j('#rp-player-wand-container').length === 0) {
+          const wandBtnHtml = `
+            <div id="rp-player-wand-container" class="extension_container interactable" tabindex="0">
+                <div id="rp-player-wand-btn" class="list-group-item flex-container flexGap5 interactable" tabindex="0">
+                    <span>🎵 RP Music Player</span>
+                </div>
+            </div>
+          `;
+          wandMenu.append(wandBtnHtml);
+          
+          $j('#rp-player-wand-btn').on('click', function () {
+            if (root.style.display === 'none') {
+              root.style.display = 'flex';
+              $j('#rp_player_show_toggle').prop('checked', true);
+            } else {
+              root.style.display = 'none';
+              $j('#rp_player_show_toggle').prop('checked', false);
+            }
+          });
+        }
+      }, 1000);
 
       const extMenu = $j('#extensions_popup .list-group');
       if (extMenu.length > 0 && $j('#rp-player-ext-btn').length === 0) {
