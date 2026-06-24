@@ -2533,9 +2533,6 @@
           wandMenu.append(toggleBtn);
         }
       }, 1000); 
-        
-        wandMenu.append(toggleBtn);
-      }
       
       if ($j('#rp-player-extension-settings').length === 0) {
         const extHtml = `
