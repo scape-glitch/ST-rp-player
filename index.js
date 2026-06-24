@@ -1564,7 +1564,7 @@
       '<div class="' + PFX + '-pill-controls">';
     if (rpEnabled()) h += '<div class="' + PFX + '-pill-vibe" data-quickvibe>' + (rpBusy ? '<span class="' + PFX + '-spin"></span>' : ICONS.wand) + '</div>';
     h += '<div class="' + PFX + '-pill-theme" data-themebtn>' + ICONS.palette + '</div>';
-    h += '<div class="' + PFX + '-pill-icon" data-notebtn>' + (isPlaying ? ICONS.pause : ICONS.play) + '</div>';
+    h += '<div class="' + PFX + '-pill-icon" data-play>' + (isPlaying ? ICONS.pause : ICONS.play) + '</div>';
     h += '</div></div>';
     return h;
   }
@@ -1579,7 +1579,7 @@
         '</div>' +
         '<div class="' + PFX + '-ymin-actions">' +
           vibeBtn +
-          '<div class="' + PFX + '-note-btn" data-notebtn>' + (isPlaying ? ICONS.pause : ICONS.play) + '</div>' +
+          '<div class="' + PFX + '-note-btn" data-play>' + (isPlaying ? ICONS.pause : ICONS.play) + '</div>' +
           '<div class="' + PFX + '-head-btn" data-themebtn>' + ICONS.palette + '</div>' +
         '</div>' +
       '</div>' +
