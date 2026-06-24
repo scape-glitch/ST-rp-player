@@ -2426,7 +2426,7 @@
     }
   }
 
-  function onInput(e) {
+    function onInput(e) {
     const el = e.target;
     if (!el) return;
 
@@ -2471,9 +2471,14 @@
           applyAccentVar();
         });
       }
+    } else if (el.hasAttribute('data-rpnum')) {
+      cfg[el.getAttribute('data-rpnum')] = parseInt(el.value, 10) || 0;
+      saveCfg();
+    } else if (el.hasAttribute('data-cfg')) {
+      cfg[el.getAttribute('data-cfg')] = el.value;
+      saveCfg();
     }
   }
-
   function bindChatEvents() {
     const c = stContext();
     if (!c || !c.eventSource || !c.eventTypes) return;
