@@ -2514,26 +2514,38 @@
 
       render();
 
-      setInterval(function () {
-        const wandMenu = $j('#chat_actions_popup .list-group');
-        if (wandMenu.length > 0 && $j('#rp-player-toggle-btn').length === 0) {
-          const toggleBtn = $j('<div id="rp-player-toggle-btn" class="list-group-item interactive extensions_menu_item" tabindex="0" title="Показать/скрыть виджет музыки">🎵 RP Music Player</div>');
-          
-          toggleBtn.on('click', function () {
-            if (root.style.display === 'none') {
-              root.style.display = 'flex';
-              $j('#rp_player_show_toggle').prop('checked', true);
-            } else {
-              root.style.display = 'none';
-              $j('#rp_player_show_toggle').prop('checked', false);
-            }
-            $j('#chat_actions_popup').hide(); 
-          });
-          
-          wandMenu.append(toggleBtn);
-        }
-      }, 1000); 
-      
+      const wandMenu = $j('#chat_actions_popup .list-group');
+      if (wandMenu.length > 0 && $j('#rp-player-wand-btn').length === 0) {
+        const wandBtn = $j('<div id="rp-player-wand-btn" class="list-group-item interactive extensions_menu_item" tabindex="0">🎵 RP Music Player</div>');
+        wandBtn.on('click', function () {
+          if (root.style.display === 'none') {
+            root.style.display = 'flex';
+            $j('#rp_player_show_toggle').prop('checked', true);
+          } else {
+            root.style.display = 'none';
+            $j('#rp_player_show_toggle').prop('checked', false);
+          }
+          $j('#chat_actions_popup').hide();
+        });
+        wandMenu.append(wandBtn);
+      }
+
+      const extMenu = $j('#extensions_popup .list-group');
+      if (extMenu.length > 0 && $j('#rp-player-ext-btn').length === 0) {
+        const extBtn = $j('<div id="rp-player-ext-btn" class="list-group-item interactive extensions_menu_item" tabindex="0">🎵 RP Music Player</div>');
+        extBtn.on('click', function () {
+          if (root.style.display === 'none') {
+            root.style.display = 'flex';
+            $j('#rp_player_show_toggle').prop('checked', true);
+          } else {
+            root.style.display = 'none';
+            $j('#rp_player_show_toggle').prop('checked', false);
+          }
+          $j('#extensions_popup').hide(); 
+        });
+        extMenu.append(extBtn);
+      }
+
       if ($j('#rp-player-extension-settings').length === 0) {
         const extHtml = `
           <div class="inline-drawer" id="rp-player-extension-settings">
