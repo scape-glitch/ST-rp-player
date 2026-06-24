@@ -1,0 +1,9 @@
+{
+    "name": "rp-player",
+    "display_name": "RP Music Player",
+    "version": "1.0.0",
+    "description": "Удобный виджет плеера с автоподбором музыки для ролеплеев.",
+    "author": "scape-glitch",
+    "js": ["index.js"],
+    "css": []
+}
