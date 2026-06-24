@@ -2514,20 +2514,25 @@
 
       render();
 
-      const wandMenu = $j('#chat_actions_popup .list-group');
-      if (wandMenu.length > 0 && $j('#rp-player-toggle-btn').length === 0) {
-        const toggleBtn = $j('<div id="rp-player-toggle-btn" class="list-group-item interactive extensions_menu_item" tabindex="0" title="Показать/скрыть виджет музыки">🎵 RP Music Player</div>');
-        
-        toggleBtn.on('click', function () {
-          if (root.style.display === 'none') {
-            root.style.display = 'flex';
-            $j('#rp_player_show_toggle').prop('checked', true);
-          } else {
-            root.style.display = 'none';
-            $j('#rp_player_show_toggle').prop('checked', false);
-          }
-          $j('#chat_actions_popup').hide(); 
-        });
+      setInterval(function () {
+        const wandMenu = $j('#chat_actions_popup .list-group');
+        if (wandMenu.length > 0 && $j('#rp-player-toggle-btn').length === 0) {
+          const toggleBtn = $j('<div id="rp-player-toggle-btn" class="list-group-item interactive extensions_menu_item" tabindex="0" title="Показать/скрыть виджет музыки">🎵 RP Music Player</div>');
+          
+          toggleBtn.on('click', function () {
+            if (root.style.display === 'none') {
+              root.style.display = 'flex';
+              $j('#rp_player_show_toggle').prop('checked', true);
+            } else {
+              root.style.display = 'none';
+              $j('#rp_player_show_toggle').prop('checked', false);
+            }
+            $j('#chat_actions_popup').hide(); 
+          });
+          
+          wandMenu.append(toggleBtn);
+        }
+      }, 1000); 
         
         wandMenu.append(toggleBtn);
       }
