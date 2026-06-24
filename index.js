@@ -32,7 +32,7 @@
   let cfg = {
     source: 'jamendo', jamendoKey: '', ytKey: '', accent: '', opacity: -1,
     rpAuto: false, rpQuick: false, rpEvery: 10, rpCount: 5,
-    rpProfile: '', rpTokenLimitOn: false, rpTokenLimit: 4000,
+    rpProfile: '', rpTokenLimitOn: false, rpTokenLimit: 6000,
     rpLang: '', rpLangCustom: '', rpQuickAutoplay: false,
     bgType: 'none', bgUrl: '', bgBase64: '', bgByTheme: {}
   };
@@ -1055,11 +1055,12 @@
     });
   }
 
-  async function callModel(prompt) {
+    async function callModel(prompt) {
     const c = stContext();
     if (!c) throw new Error('no ST context');
     const profId = selectedProfileId();
-    const maxTok = cfg.rpTokenLimitOn ? Math.max(256, Math.min(2000, cfg.rpTokenLimit || 1000)) : 1000;
+    
+    const maxTok = cfg.rpTokenLimitOn ? (parseInt(cfg.rpTokenLimit, 10) || 6000) : undefined;
 
     if (profId && c.ConnectionManagerRequestService && c.ConnectionManagerRequestService.sendRequest) {
       try {
@@ -1078,7 +1079,6 @@
     }
     throw new Error('no generation method');
   }
-
   async function runRpAnalysis(count, msgCount, mode) {
     if (rpBusy) return;
     rpBusy = true; searching = true;
@@ -1564,7 +1564,7 @@
       '<div class="' + PFX + '-pill-controls">';
     if (rpEnabled()) h += '<div class="' + PFX + '-pill-vibe" data-quickvibe>' + (rpBusy ? '<span class="' + PFX + '-spin"></span>' : ICONS.wand) + '</div>';
     h += '<div class="' + PFX + '-pill-theme" data-themebtn>' + ICONS.palette + '</div>';
-    h += '<div class="' + PFX + '-pill-icon" data-notebtn>' + (isPlaying ? ICONS.pause : ICONS.play) + '</div>';
+    h += '<div class="' + PFX + '-pill-icon" data-play>' + (isPlaying ? ICONS.pause : ICONS.play) + '</div>';
     h += '</div></div>';
     return h;
   }
@@ -1579,7 +1579,7 @@
         '</div>' +
         '<div class="' + PFX + '-ymin-actions">' +
           vibeBtn +
-          '<div class="' + PFX + '-note-btn" data-notebtn>' + (isPlaying ? ICONS.pause : ICONS.play) + '</div>' +
+          '<div class="' + PFX + '-note-btn" data-play>' + (isPlaying ? ICONS.pause : ICONS.play) + '</div>' +
           '<div class="' + PFX + '-head-btn" data-themebtn>' + ICONS.palette + '</div>' +
         '</div>' +
       '</div>' +
@@ -1806,7 +1806,7 @@
 
     h += '<div class="' + PFX + '-toggle" data-rptoggle="rpTokenLimitOn"><div><div class="' + PFX + '-toggle-label">Лимит контекста</div><div class="' + PFX + '-toggle-sub">ограничить объём сканирования</div></div><div class="' + PFX + '-sw-track ' + (cfg.rpTokenLimitOn ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>';
     if (cfg.rpTokenLimitOn) {
-      h += '<div class="' + PFX + '-numbox"><div class="' + PFX + '-flabel">Лимит токенов (≈)</div><input type="number" min="256" max="32000" step="256" data-rpnum="rpTokenLimit" value="' + (cfg.rpTokenLimit || 4000) + '"></div>';
+      h += '<div class="' + PFX + '-numbox"><div class="' + PFX + '-flabel">Лимит токенов (≈)</div><input type="number" min="1000" step="1000" data-rpnum="rpTokenLimit" value="' + (cfg.rpTokenLimit || 6000) + '"></div>';
     }
 
     h += '</div>';
