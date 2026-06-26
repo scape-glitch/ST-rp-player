@@ -16,6 +16,7 @@
   const LS_QUEUE = 'rp_player_queue_v1';
   const LS_LIB = 'rp_player_lib_v1';
   const LS_RADIO_FAV = 'rp_player_radiofav_v1';
+  const LS_RP_REJECTED = 'rp_player_rp_rejected_v1';
   const LS_SIZE = 'rp_player_size_v1';
   const DEFAULT_JAMENDO_KEY = '6fcc94f7';
   const DEFAULT_YT_KEY = 'AIzaSyDMuAcY3e7h6EDCybpGVuwGbvq7lYJB18A';
@@ -23,25 +24,42 @@
 
   const THEMES = ['default', 'glass', 'neon', 'paper', 'minimal'];
   let theme = 'default';
-  try { const c = JSON.parse(localStorage.getItem(LS_CFG) || '{}'); if (c.theme) theme = c.theme; } catch (_) {}
+  try {
+    const c = JSON.parse(localStorage.getItem(LS_CFG) || '{}');
+    if (c.theme) theme = c.theme;
+  } catch (_) {}
 
   function log(...args) { console.log('[ST Player]', ...args); }
   function warn(...args) { console.warn('[ST Player]', ...args); }
   function error(...args) { console.error('[ST Player]', ...args); }
 
   let cfg = {
-    source: 'jamendo', jamendoKey: '', ytKey: '', accent: '', opacity: -1,
+    source: 'youtube', jamendoKey: '', ytKey: '', accent: '', opacity: -1,
     rpAuto: false, rpQuick: false, rpEvery: 10, rpCount: 5,
     rpProfile: '', rpTokenLimitOn: false, rpTokenLimit: 6000,
     rpLang: '', rpLangCustom: '', rpQuickAutoplay: false,
-    bgType: 'none', bgUrl: '', bgBase64: '', bgByTheme: {}
+    bgType: 'none', bgUrl: '', bgBase64: '', bgByTheme: {},
+    textColor: '', textColorByTheme: {}, solidByTheme: {},
+    solidLightByTheme: {}, accentByTheme: {}
   };
   try { cfg = Object.assign(cfg, JSON.parse(localStorage.getItem(LS_CFG) || '{}')); } catch (_) {}
   if (!cfg.bgByTheme || typeof cfg.bgByTheme !== 'object') cfg.bgByTheme = {};
+  if (!cfg.textColorByTheme || typeof cfg.textColorByTheme !== 'object') cfg.textColorByTheme = {};
+  if (!cfg.solidByTheme || typeof cfg.solidByTheme !== 'object') cfg.solidByTheme = {};
+  if (!cfg.solidLightByTheme || typeof cfg.solidLightByTheme !== 'object') cfg.solidLightByTheme = {};
+  if (!cfg.accentByTheme || typeof cfg.accentByTheme !== 'object') cfg.accentByTheme = {};
+
   let bgPending = null;
-  function saveCfg() { try { localStorage.setItem(LS_CFG, JSON.stringify(cfg)); } catch (_) {} }
-  function jamKey() { return (cfg.jamendoKey || '').trim() || DEFAULT_JAMENDO_KEY; }
-  function ytKey() { return (cfg.ytKey || '').trim() || DEFAULT_YT_KEY; }
+
+  function saveCfg() {
+    try { localStorage.setItem(LS_CFG, JSON.stringify(cfg)); } catch (_) {}
+  }
+  function jamKey() {
+    return (cfg.jamendoKey || '').trim() || DEFAULT_JAMENDO_KEY;
+  }
+  function ytKey() {
+    return (cfg.ytKey || '').trim() || DEFAULT_YT_KEY;
+  }
 
   (function migrateOpacity() {
     if (typeof cfg.opacity === 'number' && cfg.opacity >= 0) {
@@ -55,7 +73,9 @@
   })();
 
   try {
-    ['rp_player_state_v1', 'rp_player_pos_v2', 'rp_player_pos_v3', 'liquidGlassPosition'].forEach(function (k) { localStorage.removeItem(k); });
+    ['rp_player_state_v1', 'rp_player_pos_v2', 'rp_player_pos_v3', 'liquidGlassPosition'].forEach(function (k) {
+      localStorage.removeItem(k);
+    });
   } catch (_) {}
 
   let collapsed = true;
@@ -81,6 +101,7 @@
 
   let audioCurrentTime = 0;
   let audioDuration = 0;
+  let currentPlayId = 0;
 
   (function () {
     try {
@@ -96,8 +117,13 @@
 
   function saveSize() {
     try {
-      if (collapsed) { sizeCollapsedW = userW || sizeCollapsedW; sizeCollapsedH = userH || sizeCollapsedH; }
-      else { sizeExpandedW = userW || sizeExpandedW; sizeExpandedH = userH || sizeExpandedH; }
+      if (collapsed) {
+        sizeCollapsedW = userW || sizeCollapsedW;
+        sizeCollapsedH = userH || sizeCollapsedH;
+      } else {
+        sizeExpandedW = userW || sizeExpandedW;
+        sizeExpandedH = userH || sizeExpandedH;
+      }
       localStorage.setItem(LS_SIZE, JSON.stringify({
         collapsedW: sizeCollapsedW,
         collapsedH: sizeCollapsedH,
@@ -131,8 +157,13 @@
     try {
       if (root) {
         const r = root.getBoundingClientRect();
-        if (collapsed) { posCollapsedX = Math.round(r.left); posCollapsedY = Math.round(r.top); }
-        else { posExpandedX = Math.round(r.left); posExpandedY = Math.round(r.top); }
+        if (collapsed) {
+          posCollapsedX = Math.round(r.left);
+          posCollapsedY = Math.round(r.top);
+        } else {
+          posExpandedX = Math.round(r.left);
+          posExpandedY = Math.round(r.top);
+        }
       }
       localStorage.setItem(LS_KEY, JSON.stringify({
         collapsed: collapsed,
@@ -147,10 +178,32 @@
   }
 
   let $j;
-  function jq() { return (typeof $ === 'function' && $.fn) ? $ : (window.jQuery && window.jQuery.fn ? window.jQuery : null); }
-  function scriptId() { try { if (typeof getScriptId === 'function') return getScriptId(); } catch (_) {} return null; }
-  function VW() { let w = 0; if ($j) { try { w = $j('body').width() || $j(window).width() || 0; } catch (_) {} } if (!w) w = window.innerWidth || 360; return w; }
-  function VH() { let h = 0; if ($j) { try { h = $j('body').height() || $j(window).height() || 0; } catch (_) {} } if (!h) h = window.innerHeight || 640; return h; }
+
+  function jq() {
+    return (typeof $ === 'function' && $.fn) ? $ : (window.jQuery && window.jQuery.fn ? window.jQuery : null);
+  }
+  function scriptId() {
+    try {
+      if (typeof getScriptId === 'function') return getScriptId();
+    } catch (_) {}
+    return null;
+  }
+  function VW() {
+    let w = 0;
+    if ($j) {
+      try { w = $j('body').width() || $j(window).width() || 0; } catch (_) {}
+    }
+    if (!w) w = window.innerWidth || 360;
+    return w;
+  }
+  function VH() {
+    let h = 0;
+    if ($j) {
+      try { h = $j('body').height() || $j(window).height() || 0; } catch (_) {}
+    }
+    if (!h) h = window.innerHeight || 640;
+    return h;
+  }
 
   function topBarOffset() {
     let off = 0;
@@ -170,23 +223,38 @@
     if (off < 0) off = 0;
     return Math.max(8, Math.min(off + 6, 160));
   }
+
   let TOPBAR = topBarOffset();
-  function refreshTopbar() { TOPBAR = topBarOffset(); }
+
+  function refreshTopbar() {
+    TOPBAR = topBarOffset();
+  }
 
   function stContext() {
-    try { if (window.SillyTavern && window.SillyTavern.getContext) return window.SillyTavern.getContext(); } catch (_) {}
+    try {
+      if (window.SillyTavern && window.SillyTavern.getContext) return window.SillyTavern.getContext();
+    } catch (_) {}
     return null;
   }
+
   function getChatId() {
     const c = stContext();
-    if (c) { try { return String(c.chatId || c.characterId || c.groupId || 'default'); } catch (_) {} }
+    if (c) {
+      try { return String(c.chatId || c.characterId || c.groupId || 'default'); } catch (_) {}
+    }
     return 'default';
   }
+
   function getChatName() {
     const c = stContext();
-    if (c) { try { return String(c.name2 || c.characterName || ('Чат ' + (c.chatId || ''))).slice(0, 40) || 'Чат'; } catch (_) {} }
+    if (c) {
+      try {
+        return String(c.name2 || c.characterName || ('Чат ' + (c.chatId || ''))).slice(0, 40) || 'Чат';
+      } catch (_) {}
+    }
     return 'Чат';
   }
+
   function dateStamp() {
     const d = new Date();
     const p = function (n) { return (n < 10 ? '0' : '') + n; };
@@ -203,7 +271,7 @@
   let ytCurrentEmbed = null;
 
   audio.addEventListener('timeupdate', function () {
-    if (curIdx >= 0 && queue[curIdx] && queue[curIdx].kind === 'audio') {
+    if (curIdx >= 0 && queue[curIdx]) {
       audioCurrentTime = audio.currentTime;
       audioDuration = audio.duration || 0;
       updateProgressBarUI();
@@ -211,7 +279,7 @@
   });
 
   audio.addEventListener('loadedmetadata', function () {
-    if (curIdx >= 0 && queue[curIdx] && queue[curIdx].kind === 'audio') {
+    if (curIdx >= 0 && queue[curIdx]) {
       audioDuration = audio.duration || 0;
       updateProgressBarUI();
     }
@@ -244,42 +312,135 @@
 
   let lib = { manual: [], rp: {} };
   try { lib = Object.assign({ manual: [], rp: {} }, JSON.parse(localStorage.getItem(LS_LIB) || '{}')); } catch (_) {}
-  function saveLib() { try { localStorage.setItem(LS_LIB, JSON.stringify(lib)); } catch (_) {} }
+  function saveLib() {
+    try { localStorage.setItem(LS_LIB, JSON.stringify(lib)); } catch (_) {}
+  }
 
   let radioFav = [];
-  try { const a = JSON.parse(localStorage.getItem(LS_RADIO_FAV) || '[]'); if (Array.isArray(a)) radioFav = a; } catch (_) {}
-  function saveRadioFav() { try { localStorage.setItem(LS_RADIO_FAV, JSON.stringify(radioFav)); } catch (_) {} }
-  function isRadioFav(url) { return radioFav.some(function (s) { return s.url === url; }); }
+  try {
+    const a = JSON.parse(localStorage.getItem(LS_RADIO_FAV) || '[]');
+    if (Array.isArray(a)) radioFav = a;
+  } catch (_) {}
+  function saveRadioFav() {
+    try { localStorage.setItem(LS_RADIO_FAV, JSON.stringify(radioFav)); } catch (_) {}
+  }
+
+  let rpRejected = {};
+  try {
+    const r = JSON.parse(localStorage.getItem(LS_RP_REJECTED) || '{}');
+    if (r && typeof r === 'object') rpRejected = r;
+  } catch (_) {}
+
+  function saveRpRejected() {
+    try { localStorage.setItem(LS_RP_REJECTED, JSON.stringify(rpRejected)); } catch (_) {}
+  }
+
+  function isRadioFav(url) {
+    return radioFav.some(function (s) { return s.url === url; });
+  }
+
   function toggleRadioFav(station) {
-    if (isRadioFav(station.url)) radioFav = radioFav.filter(function (s) { return s.url !== station.url; });
-    else radioFav.push({ name: station.name, url: station.url, tag: station.tag || '' });
-    saveRadioFav(); render();
+    if (isRadioFav(station.url)) {
+      radioFav = radioFav.filter(function (s) { return s.url !== station.url; });
+    } else {
+      radioFav.push({ name: station.name, url: station.url, tag: station.tag || '' });
+    }
+    saveRadioFav();
+    render();
   }
 
   const SOMA_STATIONS = [
     { name: 'Drone Zone', url: 'https://ice1.somafm.com/dronezone-128-mp3', tag: 'ambient/космос' },
     { name: 'Groove Salad', url: 'https://ice1.somafm.com/groovesalad-128-mp3', tag: 'чилл/даунтемпо' },
+    { name: 'Groove Salad Classic', url: 'https://ice1.somafm.com/gsclassic-128-mp3', tag: 'чилл/классика Soma' },
     { name: 'Deep Space One', url: 'https://ice1.somafm.com/deepspaceone-128-mp3', tag: 'тёмный эмбиент' },
-    { name: 'Space Station', url: 'https://ice1.somafm.com/spacestation-128-mp3', tag: 'электро/спейс' },
+    { name: 'Space Station Soma', url: 'https://ice1.somafm.com/spacestation-128-mp3', tag: 'электро/спейс' },
+    { name: 'Mission Control', url: 'https://ice1.somafm.com/missioncontrol-128-mp3', tag: 'эмбиент/космос' },
     { name: 'Lush', url: 'https://ice1.somafm.com/lush-128-mp3', tag: 'вокал/мечтательное' },
     { name: 'Beat Blender', url: 'https://ice1.somafm.com/beatblender-128-mp3', tag: 'хаус/даунтемпо' },
     { name: 'Secret Agent', url: 'https://ice1.somafm.com/secretagent-128-mp3', tag: 'спай/джаз/нуар' },
-    { name: 'Mission Control', url: 'https://ice1.somafm.com/missioncontrol-128-mp3', tag: 'эмбиент/космос' },
-    { name: 'Dub Step Beyond', url: 'https://ice1.somafm.com/dubstep-128-mp3', tag: 'дабстеп' },
+    { name: 'Dub Step Beyond', url: 'https://ice1.somafm.com/dubstep-128-mp3', tag: 'дабстеп/бас' },
     { name: 'DEF CON Radio', url: 'https://ice1.somafm.com/defcon-128-mp3', tag: 'тёмное электро' },
     { name: 'The Trip', url: 'https://ice1.somafm.com/thetrip-128-mp3', tag: 'прог/транс' },
     { name: 'Black Rock FM', url: 'https://ice1.somafm.com/brfm-128-mp3', tag: 'разное/burning man' },
-    { name: 'Indie Pop Rocks', url: 'https://ice1.somafm.com/indiepop-128-mp3', tag: 'инди-поп' },
+    { name: 'Indie Pop Rocks', url: 'https://ice1.somafm.com/indiepop-128-mp3', tag: 'инди-поп/альтернатива' },
     { name: 'Metal Detector', url: 'https://ice1.somafm.com/metal-128-mp3', tag: 'метал' },
-    { name: 'Folk Forward', url: 'https://ice1.somafm.com/folkfwd-128-mp3', tag: 'фолк' },
+    { name: 'Folk Forward', url: 'https://ice1.somafm.com/folkfwd-128-mp3', tag: 'фолк/инди-фолк' },
     { name: 'Seven Inch Soul', url: 'https://ice1.somafm.com/7soul-128-mp3', tag: 'соул/фанк' },
     { name: 'Suburbs of Goa', url: 'https://ice1.somafm.com/suburbsofgoa-128-mp3', tag: 'world/desi' },
     { name: 'Vaporwaves', url: 'https://ice1.somafm.com/vaporwaves-128-mp3', tag: 'вейпорвейв' },
     { name: 'Sonic Universe', url: 'https://ice1.somafm.com/sonicuniverse-128-mp3', tag: 'авангард-джаз' },
-    { name: 'Fluid', url: 'https://ice1.somafm.com/fluid-128-mp3', tag: 'хип-хоп/трип' }
+    { name: 'Fluid', url: 'https://ice1.somafm.com/fluid-128-mp3', tag: 'хип-хоп/трип-хоп' },
+    { name: 'Illinois Street Lounge', url: 'https://ice1.somafm.com/illstreet-128-mp3', tag: 'lounge/retro' },
+    { name: 'Boot Liquor', url: 'https://ice1.somafm.com/bootliquor-128-mp3', tag: 'americana/country' },
+    { name: 'BAGeL Radio', url: 'https://ice1.somafm.com/bagel-128-mp3', tag: 'альтернатива/инди/андерграунд' },
+    { name: 'Doomed', url: 'https://ice1.somafm.com/doomed-128-mp3', tag: 'dark/industrial/doom' },
+    { name: 'PopTron', url: 'https://ice1.somafm.com/poptron-128-mp3', tag: 'electropop/synthpop' },
+    { name: 'Cliqhop IDM', url: 'https://ice1.somafm.com/cliqhop-128-mp3', tag: 'idm/glitch' },
+    { name: 'Digitalis', url: 'https://ice1.somafm.com/digitalis-128-mp3', tag: 'инди-электро/альт' },
+    { name: 'Underground 80s', url: 'https://ice1.somafm.com/u80s-128-mp3', tag: 'андерграунд/80s/post-punk' },
+    { name: 'Covers', url: 'https://ice1.somafm.com/covers-128-mp3', tag: 'каверы/разное' }
   ];
 
-  const RADIO_CHIPS = ['jazz', 'lofi', 'ambient', 'rock', 'classical', 'chill', 'electronic', 'pop', 'metal', 'folk'];
+  const RADIO_CHIPS = [
+    'jazz', 'lofi', 'ambient', 'rock', 'classical', 'chill', 'electronic', 'pop', 'metal', 'folk',
+    'rap', 'hip-hop', 'trip-hop', 'alternative', 'indie', 'underground', 'punk', 'post-punk',
+    'industrial', 'darkwave', 'goth', 'crunkcore', 'breakcore', 'drum and bass', 'dubstep',
+    'synthpop', 'vaporwave', 'funk', 'soul'
+  ];
+
+  let somaLoading = false;
+  let somaLoadedFromApi = false;
+
+  async function loadMoreSomaStations() {
+    if (somaLoading) return;
+    somaLoading = true;
+    statusMsg = 'Загружаю станции SomaFM…';
+    render();
+
+    try {
+      const res = await fetchTimeout('https://somafm.com/channels.json', 6000);
+      if (!res.ok) throw new Error('soma_http');
+      const data = await res.json();
+      const chans = data && Array.isArray(data.channels) ? data.channels : [];
+      let added = 0;
+
+      chans.forEach(function (ch) {
+        const pls = Array.isArray(ch.playlists) ? ch.playlists : [];
+        let url = '';
+        const mp3 = pls.find(function (p) {
+          return p && p.format === 'mp3' && p.url && /128|highest|mp3/i.test(String(p.url));
+        }) || pls.find(function (p) {
+          return p && p.format === 'mp3' && p.url;
+        });
+
+        if (mp3 && mp3.url) url = mp3.url;
+        if (!url && ch.id) url = 'https://ice1.somafm.com/' + ch.id + '-128-mp3';
+        if (!url) return;
+
+        const exists = SOMA_STATIONS.some(function (s) {
+          return s.url === url || String(s.name).toLowerCase() === String(ch.title || ch.id).toLowerCase();
+        });
+
+        if (!exists) {
+          SOMA_STATIONS.push({
+            name: ch.title || ch.id || 'SomaFM',
+            url: url,
+            tag: String(ch.genre || ch.description || '').replace(/\s+/g, ' ').slice(0, 80)
+          });
+          added++;
+        }
+      });
+
+      somaLoadedFromApi = true;
+      statusMsg = added ? ('Добавлено станций: ' + added) : 'Все станции SomaFM уже загружены';
+    } catch (e) {
+      statusMsg = 'Не удалось загрузить SomaFM';
+    }
+
+    somaLoading = false;
+    render();
+  }
 
   const RP_LANGS = [
     { id: '', label: 'Любой' },
@@ -307,7 +468,7 @@
       if (bgPending && (bgPending.base64 || bgPending.url)) {
         b = bgPending;
       } else {
-        b = currentBg(); 
+        b = currentBg();
       }
       var img = b ? (b.base64 || b.url) : '';
       if (img) {
@@ -333,7 +494,9 @@
     } else {
       delete cfg.bgByTheme[themeId];
     }
-    saveCfg(); applyBackground(); applyAccentVar();
+    saveCfg();
+    applyBackground();
+    applyAccentVar();
   }
 
   function applyBgToAllThemes(bgObj) {
@@ -348,7 +511,43 @@
         delete cfg.bgByTheme[tm];
       }
     });
-    saveCfg(); applyBackground(); applyAccentVar();
+    saveCfg();
+    applyBackground();
+    applyAccentVar();
+  }
+
+  function bgForApplyOrCurrent() {
+    let b = null;
+
+    if (bgPending && (bgPending.base64 || bgPending.url || typeof bgPending.opacity === 'number')) {
+      b = JSON.parse(JSON.stringify(bgPending));
+    } else {
+      const cur = currentBg();
+      if (cur && (cur.base64 || cur.url || typeof cur.opacity === 'number')) {
+        b = JSON.parse(JSON.stringify(cur));
+      }
+    }
+
+    if (!b) b = {};
+
+    try {
+      const inp = bodyEl && bodyEl.querySelector ? bodyEl.querySelector('[data-bg-url]') : null;
+      const url = inp ? String(inp.value || '').trim() : '';
+      if (url) {
+        b.url = url;
+        b.base64 = '';
+      }
+    } catch (_) {}
+
+    if (bgPending && typeof bgPending.opacity === 'number') {
+      b.opacity = bgPending.opacity;
+    } else {
+      const cur = currentBg();
+      if (cur && typeof cur.opacity === 'number' && typeof b.opacity !== 'number') b.opacity = cur.opacity;
+    }
+
+    if (!(b.base64 || b.url || typeof b.opacity === 'number')) return null;
+    return b;
   }
 
   function setBgPendingFromUrl(url) {
@@ -356,62 +555,200 @@
     if (url) bgPending = { base64: '', url: url };
     else bgPending = null;
   }
+
   function setBgPendingFromFile(file, cb) {
-    if (!file) { bgPending = null; if (cb) cb(); return; }
+    if (!file) {
+      bgPending = null;
+      if (cb) cb();
+      return;
+    }
     var reader = new FileReader();
-    reader.onload = function (ev) { bgPending = { base64: ev.target.result || '', url: '' }; if (cb) cb(); };
-    reader.onerror = function (e) { if (cb) cb(); };
+    reader.onload = function (ev) {
+      bgPending = { base64: ev.target.result || '', url: '' };
+      if (cb) cb();
+    };
+    reader.onerror = function (e) {
+      if (cb) cb();
+    };
     reader.readAsDataURL(file);
   }
 
-  function playRadio(station) {
+  function currentTextColor() {
+    var c = cfg.textColorByTheme && cfg.textColorByTheme[theme];
+    if (validHex(c)) return normHex(c);
+    if (validHex(cfg.textColor)) return normHex(cfg.textColor);
+    return '';
+  }
+
+  function setTextColorForTheme(themeId, hex) {
+    if (!themeId) return;
+    if (hex && validHex(hex)) cfg.textColorByTheme[themeId] = normHex(hex);
+    else delete cfg.textColorByTheme[themeId];
+    saveCfg();
+    applyTextColorVar();
+  }
+
+  function setTextColorForAll(hex) {
+    THEMES.forEach(function (tm) {
+      if (hex && validHex(hex)) cfg.textColorByTheme[tm] = normHex(hex);
+      else delete cfg.textColorByTheme[tm];
+    });
+    saveCfg();
+    applyTextColorVar();
+  }
+
+  function applyTextColorVar() {
+    if (!root) return;
+    var c = currentTextColor();
+    if (c) root.style.setProperty('--rp-text', c);
+    else root.style.removeProperty('--rp-text');
+  }
+
+  function isSolidTheme() {
+    return !!(cfg.solidByTheme && cfg.solidByTheme[theme]);
+  }
+
+  function setSolidForTheme(themeId, on) {
+    if (!themeId) return;
+    if (on) cfg.solidByTheme[themeId] = true;
+    else delete cfg.solidByTheme[themeId];
+    saveCfg();
+    applySolidClass();
+  }
+
+  function setSolidForAll(on) {
+    THEMES.forEach(function (tm) {
+      if (on) cfg.solidByTheme[tm] = true;
+      else delete cfg.solidByTheme[tm];
+    });
+    saveCfg();
+    applySolidClass();
+  }
+
+  function isSolidLightTheme() {
+    return !!(cfg.solidLightByTheme && cfg.solidLightByTheme[theme]);
+  }
+
+  function setSolidLightForTheme(themeId, on) {
+    if (!themeId) return;
+    if (on) cfg.solidLightByTheme[themeId] = true;
+    else delete cfg.solidLightByTheme[themeId];
+    saveCfg();
+    applySolidClass();
+  }
+
+  function setSolidLightForAll(on) {
+    THEMES.forEach(function (tm) {
+      if (on) cfg.solidLightByTheme[tm] = true;
+      else delete cfg.solidLightByTheme[tm];
+    });
+    saveCfg();
+    applySolidClass();
+  }
+
+  function applySolidClass() {
+    if (!root) return;
+    root.classList.remove(PFX + '-solid');
+    root.classList.remove(PFX + '-solid-light');
+    if (isSolidLightTheme()) root.classList.add(PFX + '-solid-light');
+    else if (isSolidTheme()) root.classList.add(PFX + '-solid');
+  }
+
+    function playRadio(station) {
+    currentPlayId++;
+    stopAudio();
     stopYt();
     statusMsg = '';
     curIdx = -1;
     queue = [];
+    saveQueue();
+
     audio.src = station.url;
-    audio.play().then(function () { isPlaying = true; window.__rpRadioNow = station; render(); })
-      .catch(function (e) { isPlaying = false; statusMsg = 'Радио недоступно'; render(); });
+
+    audio.play().then(function () {
+      isPlaying = true;
+      window.__rpRadioNow = station;
+      render();
+    }).catch(function () {
+      isPlaying = false;
+      statusMsg = 'Радио недоступно';
+      render();
+    });
+
     window.__rpRadioNow = station;
     render();
   }
 
+
   async function searchRadioBrowser(q) {
-    statusMsg = 'Поиск радио…'; radioResults = []; render();
+    statusMsg = 'Поиск радио…';
+    radioResults = [];
+    render();
     try {
       const base = 'https://de1.api.radio-browser.info/json/stations/search';
       let res, data;
-      try { res = await fetch(base + '?limit=20&hidebroken=true&order=clickcount&reverse=true&tag=' + encodeURIComponent(q)); data = await res.json(); } catch (_) { data = []; }
-      if (!data || !data.length) { res = await fetch(base + '?limit=20&hidebroken=true&order=clickcount&reverse=true&name=' + encodeURIComponent(q)); data = await res.json(); }
-      radioResults = (data || []).filter(function (s) { return s.url_resolved; }).slice(0, 18).map(function (s) {
-        return { name: s.name || 'станция', url: s.url_resolved, tag: (s.country || '') + (s.tags ? ' · ' + String(s.tags).split(',').slice(0, 2).join(',') : '') };
+      try {
+        res = await fetch(base + '?limit=20&hidebroken=true&order=clickcount&reverse=true&tag=' + encodeURIComponent(q));
+        data = await res.json();
+      } catch (_) {
+        data = [];
+      }
+      if (!data || !data.length) {
+        res = await fetch(base + '?limit=20&hidebroken=true&order=clickcount&reverse=true&name=' + encodeURIComponent(q));
+        data = await res.json();
+      }
+      radioResults = (data || []).filter(function (s) {
+        return s.url_resolved;
+      }).slice(0, 18).map(function (s) {
+        return {
+          name: s.name || 'станция',
+          url: s.url_resolved,
+          tag: (s.country || '') + (s.tags ? ' · ' + String(s.tags).split(',').slice(0, 2).join(',') : '')
+        };
       });
       statusMsg = radioResults.length ? '' : 'Ничего не найдено';
-    } catch (e) { statusMsg = 'Ошибка поиска радио'; }
+    } catch (e) {
+      statusMsg = 'Ошибка поиска радио';
+    }
     render();
   }
 
   let baibaiLoaded = false, baibaiLoading = false;
+
   function loadBaibai() {
     if (baibaiLoaded || baibaiLoading) return;
-    if (window.Music && window.Music.SearchMusic) { baibaiLoaded = true; return; }
+    if (window.Music && window.Music.SearchMusic) {
+      baibaiLoaded = true;
+      return;
+    }
     baibaiLoading = true;
     try {
       const s = document.createElement('script');
       s.src = BAIBAI_JS;
-      s.onload = function () { baibaiLoaded = true; baibaiLoading = false; };
-      s.onerror = function () { baibaiLoading = false; };
+      s.onload = function () {
+        baibaiLoaded = true;
+        baibaiLoading = false;
+      };
+      s.onerror = function () {
+        baibaiLoading = false;
+      };
       (document.head || document.documentElement).appendChild(s);
-    } catch (_) { baibaiLoading = false; }
+    } catch (_) {
+      baibaiLoading = false;
+    }
   }
 
   function saveQueue() {
     try { localStorage.setItem(LS_QUEUE, JSON.stringify({ queue: queue, curIdx: curIdx })); } catch (_) {}
   }
+
   function loadQueue() {
     try {
       const s = JSON.parse(localStorage.getItem(LS_QUEUE) || '{}');
-      if (Array.isArray(s.queue)) { queue = s.queue; curIdx = (typeof s.curIdx === 'number') ? s.curIdx : -1; }
+      if (Array.isArray(s.queue)) {
+        queue = s.queue;
+        curIdx = (typeof s.curIdx === 'number') ? s.curIdx : -1;
+      }
     } catch (_) {}
   }
 
@@ -422,6 +759,7 @@
     if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
     return null;
   }
+
   function extractYtList(s) {
     s = String(s || '').trim();
     let m = s.match(/[?&]list=([A-Za-z0-9_-]+)/);
@@ -429,7 +767,9 @@
     return null;
   }
 
-  function hasDash(s) { return /[-—–]/.test(String(s || '')); }
+  function hasDash(s) {
+    return /[-—–]/.test(String(s || ''));
+  }
 
   function fetchWithCancel(url, options = {}, controller) {
     const opts = Object.assign({}, options);
@@ -438,7 +778,8 @@
   }
 
   const Jamendo = {
-    name: 'Jamendo', type: 'audio',
+    name: 'Jamendo',
+    type: 'audio',
     async search(query, controller) {
       const url = 'https://api.jamendo.com/v3.0/tracks/?client_id=' + encodeURIComponent(jamKey()) +
         '&format=json&limit=1&audioformat=mp32&search=' + encodeURIComponent(query);
@@ -454,37 +795,81 @@
       const res = await fetchWithCancel(url, {}, controller);
       const data = await res.json();
       if (!data || !data.results || !data.results.length) return [];
-      return data.results.filter(function (t) { return t.audio; }).map(function (t) {
+      return data.results.filter(function (t) {
+        return t.audio;
+      }).map(function (t) {
         return { kind: 'audio', url: t.audio, title: t.name, artist: t.artist_name, source: 'Jamendo' };
       });
     }
   };
 
   const YouTubeAPI = {
-    name: 'YouTube', type: 'yt',
+    name: 'YouTube',
+    type: 'yt',
+    async searchNoKey(query, limit = 10) {
+      const fallback = ['https://inv.thepixora.com', 'https://invidious.jing.rocks', 'https://yt.artemislena.eu', 'https://invidious.private.coffee'];
+      let instances = cachedInvidious.length > 0 ? cachedInvidious : fallback;
+      const pool = instances.sort(() => 0.5 - Math.random()).slice(0, 3);
+
+      for (let url of pool) {
+        try {
+          const res = await fetchTimeout(`${url}/api/v1/search?q=${encodeURIComponent(query)}&type=video`, 4000);
+          if (!res.ok) continue;
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            return data.slice(0, limit).map(it => ({
+              kind: 'yt',
+              ytid: it.videoId,
+              title: it.title,
+              artist: it.author || '',
+              source: 'YouTube (NK)'
+            }));
+          }
+        } catch (e) {
+          console.warn('[RP_Player] Invidious search fail on ' + url);
+        }
+      }
+      return null;
+    },
     async search(query, controller) {
+      if (!cfg.ytKey || cfg.ytKey === DEFAULT_YT_KEY) {
+        const results = await this.searchNoKey(query, 1);
+        if (results && results[0]) return results[0];
+      }
+
       const url = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=1&q=' +
         encodeURIComponent(query) + '&key=' + encodeURIComponent(ytKey());
       const res = await fetchWithCancel(url, {}, controller);
       const data = await res.json();
-      if (data && data.error) { console.warn('[RP_Player] YT API error', data.error); throw new Error('yt'); }
+      if (data && data.error) throw new Error('yt_api_error');
       if (!data || !data.items || !data.items.length) return null;
       const it = data.items[0];
       let title = (it.snippet.title || '');
-      const ta = document.createElement('textarea'); ta.innerHTML = title; title = ta.value;
+      const ta = document.createElement('textarea');
+      ta.innerHTML = title;
+      title = ta.value;
       return { kind: 'yt', ytid: it.id.videoId, title: title, artist: it.snippet.channelTitle || '', source: 'YouTube' };
     },
     async searchMany(query, limit, offset, pageToken, controller) {
+      if (!cfg.ytKey || cfg.ytKey === DEFAULT_YT_KEY) {
+        const items = await this.searchNoKey(query, limit || 10);
+        if (items) return { items: items, nextToken: null };
+      }
+
       let url = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&order=relevance&maxResults=' +
         (limit || 10) + '&q=' + encodeURIComponent(query) + '&key=' + encodeURIComponent(ytKey());
       if (pageToken) url += '&pageToken=' + encodeURIComponent(pageToken);
       const res = await fetchWithCancel(url, {}, controller);
       const data = await res.json();
-      if (data && data.error) { console.warn('[RP_Player] YT API error', data.error); throw new Error('yt'); }
+      if (data && data.error) throw new Error('yt_api_error');
       if (!data || !data.items || !data.items.length) return { items: [], nextToken: null };
-      const items = data.items.filter(function (it) { return it.id && it.id.videoId; }).map(function (it) {
+      const items = data.items.filter(function (it) {
+        return it.id && it.id.videoId;
+      }).map(function (it) {
         let title = (it.snippet.title || '');
-        const ta = document.createElement('textarea'); ta.innerHTML = title; title = ta.value;
+        const ta = document.createElement('textarea');
+        ta.innerHTML = title;
+        title = ta.value;
         return { kind: 'yt', ytid: it.id.videoId, title: title, artist: it.snippet.channelTitle || '', source: 'YouTube' };
       });
       return { items: items, nextToken: data.nextPageToken || null };
@@ -492,7 +877,8 @@
   };
 
   const YouTubeLink = {
-    name: 'YT-ссылка', type: 'yt',
+    name: 'YT-ссылка',
+    type: 'yt',
     async search(query) {
       const list = extractYtList(query);
       const vid = extractYtVideo(query);
@@ -511,11 +897,15 @@
   };
 
   const Baibai = {
-    name: 'baibai', type: 'audio',
+    name: 'baibai',
+    type: 'audio',
     async search(query) {
       loadBaibai();
       let tries = 0;
-      while ((!window.Music || !window.Music.SearchMusic) && tries < 30) { await new Promise(function (r) { setTimeout(r, 100); }); tries++; }
+      while ((!window.Music || !window.Music.SearchMusic) && tries < 30) {
+        await new Promise(function (r) { setTimeout(r, 100); });
+        tries++;
+      }
       if (!window.Music || !window.Music.SearchMusic) throw new Error('baibai not loaded');
       const r = await window.Music.SearchMusic(query, '');
       if (!r || !r.Url) return null;
@@ -529,7 +919,8 @@
   };
 
   const CCMixter = {
-    name: 'ccMixter', type: 'audio',
+    name: 'ccMixter',
+    type: 'audio',
     async search(query, controller) {
       const arr = await this.searchMany(query, 1, 0, controller);
       return arr.length ? arr[0] : null;
@@ -543,7 +934,9 @@
       data.forEach(function (t) {
         let mp3 = '';
         if (t.files && t.files.length) {
-          const f = t.files.find(function (x) { return x.download_url && /mp3/i.test(x.file_name || x.download_url); }) || t.files[0];
+          const f = t.files.find(function (x) {
+            return x.download_url && /mp3/i.test(x.file_name || x.download_url);
+          }) || t.files[0];
           mp3 = f && f.download_url ? f.download_url : '';
         }
         if (mp3) out.push({ kind: 'audio', url: mp3, title: t.upload_name || query, artist: t.user_name || '', source: 'ccMixter' });
@@ -553,7 +946,8 @@
   };
 
   const FMA = {
-    name: 'FMA', type: 'audio',
+    name: 'FMA',
+    type: 'audio',
     async search(query, controller) {
       const arr = await this.searchMany(query, 1, 0, controller);
       return arr.length ? arr[0] : null;
@@ -574,6 +968,169 @@
     }
   };
 
+  const ALL_SOURCES = [YouTubeAPI, Jamendo, Baibai, CCMixter, FMA];
+
+  async function fetchTimeout(url, ms = 4500) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), ms);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(id);
+      return res;
+    } catch (e) {
+      clearTimeout(id);
+      throw e;
+    }
+  }
+
+  async function getNetEaseStream(query) {
+    try {
+      const searchRes = await fetchTimeout(`https://music-api.gdstudio.xyz/api.php?types=search&count=3&source=netease&name=${encodeURIComponent(query)}`);
+      if (!searchRes.ok) return null;
+      const searchData = await searchRes.json();
+      if (!searchData || searchData.length === 0 || !searchData[0].id) return null;
+
+      const urlRes = await fetchTimeout(`https://music-api.gdstudio.xyz/api.php?types=url&source=netease&id=${searchData[0].id}`);
+      if (!urlRes.ok) return null;
+      const urlData = await urlRes.json();
+
+      if (urlData && urlData.url && urlData.url.startsWith('http')) return urlData.url;
+    } catch (e) {
+      return null;
+    }
+    return null;
+  }
+
+  let cachedInvidious = [];
+  let invFetchTime = 0;
+
+    async function tryInvidiousStream(videoId) {
+    const fallback = ['https://inv.thepixora.com', 'https://invidious.jing.rocks', 'https://yt.artemislena.eu', 'https://invidious.private.coffee'];
+    let instances = fallback;
+
+    if (cachedInvidious.length > 0 && Date.now() - invFetchTime < 3600000) {
+      instances = cachedInvidious;
+    } else {
+      try {
+        const res = await fetchTimeout('https://api.invidious.io/instances.json?sort_by=health', 3000);
+        if (res.ok) {
+          const data = await res.json();
+          const valid = data.filter(function (d) {
+            return d[1] && d[1].type === 'https' && d[1].api === true && d[1].cors === true && d[1].health > 50;
+          }).map(function (d) {
+            return d[1].uri;
+          });
+          if (valid.length > 0) {
+            instances = valid;
+            cachedInvidious = valid;
+            invFetchTime = Date.now();
+          }
+        }
+      } catch (e) {}
+    }
+
+    const pool = instances.sort(() => 0.5 - Math.random()).slice(0, 5);
+    const promises = pool.map(async function (url) {
+      const res = await fetchTimeout(`${url}/api/v1/videos/${videoId}`);
+      if (!res.ok) throw new Error('bad http');
+      const data = await res.json();
+      if (data.adaptiveFormats) {
+        const audio = data.adaptiveFormats.filter(function (f) {
+          return f.type && f.type.startsWith('audio');
+        });
+        if (audio.length > 0) {
+          const stream = audio.find(function (s) {
+            return parseInt(s.bitrate || 0, 10) >= 120000;
+          }) || audio[0];
+          if (stream && stream.url) return stream.url;
+        }
+      }
+      throw new Error('no stream');
+    });
+
+    return await Promise.any(promises).catch(function () { return null; });
+  }
+
+  let cachedPiped = [];
+  let pipedFetchTime = 0;
+
+  async function tryPipedStream(videoId) {
+    const fallback = ['https://piapi.ggtyler.dev', 'https://pipedapi.tokhmi.xyz', 'https://pipedapi.kavin.rocks', 'https://api.piped.private.coffee'];
+    let instances = fallback;
+
+    if (cachedPiped.length > 0 && Date.now() - pipedFetchTime < 3600000) {
+      instances = cachedPiped;
+    } else {
+      try {
+        const res = await fetchTimeout('https://raw.githubusercontent.com/TeamPiped/Piped-Instances/main/instances.json', 3000);
+        if (res.ok) {
+          const data = await res.json();
+          const valid = data.filter(function (i) {
+            return i.api_url;
+          }).map(function (i) {
+            return i.api_url;
+          });
+          if (valid.length > 0) {
+            instances = valid;
+            cachedPiped = valid;
+            pipedFetchTime = Date.now();
+          }
+        }
+      } catch (e) {}
+    }
+
+    const pool = instances.sort(() => 0.5 - Math.random()).slice(0, 5);
+    const promises = pool.map(async function (url) {
+      const res = await fetchTimeout(`${url}/streams/${videoId}`);
+      if (!res.ok) throw new Error('bad http');
+      const data = await res.json();
+      if (data.audioStreams && data.audioStreams.length > 0) {
+        const stream = data.audioStreams.find(function (s) {
+          return s.bitrate >= 120000;
+        }) || data.audioStreams[0];
+        if (stream && stream.url) return stream.url;
+      }
+      throw new Error('no stream');
+    });
+
+    return await Promise.any(promises).catch(function () { return null; });
+  }
+
+  async function getTrackAudioStream(track) {
+    if (!track) return null;
+
+    let query = (track.title || '') + ' ' + (track.artist || '');
+    query = query.replace(/\b(official|music video|audio|hd|hq|lyrics|video)\b/gi, '').replace(/\s+/g, ' ').trim();
+
+    if (query.length > 2) {
+      console.log(`[RP_Player] Пробуем NetEase API для: "${query}"`);
+      const neteaseUrl = await getNetEaseStream(query);
+      if (neteaseUrl) {
+        console.log('[RP_Player] Успех! Звук вытянут через NetEase API');
+        return neteaseUrl;
+      }
+    }
+
+    if (!track.ytid) return null;
+
+    console.log(`[RP_Player] Пробуем Invidious API для ID: ${track.ytid}`);
+    const invUrl = await tryInvidiousStream(track.ytid);
+    if (invUrl) {
+      console.log('[RP_Player] Успех! Звук вытянут через Invidious');
+      return invUrl;
+    }
+
+    console.log(`[RP_Player] Пробуем Piped API для ID: ${track.ytid}`);
+    const pipedUrl = await tryPipedStream(track.ytid);
+    if (pipedUrl) {
+      console.log('[RP_Player] Успех! Звук вытянут через Piped');
+      return pipedUrl;
+    }
+
+    console.warn('[RP_Player] Все обходы не сработали');
+    return null;
+  }
+
   function activeSource() {
     if (cfg.source === 'youtube') return YouTubeAPI;
     if (cfg.source === 'ytlink') return YouTubeLink;
@@ -583,14 +1140,19 @@
     return Jamendo;
   }
 
-  const ALL_SOURCES = [Jamendo, Baibai, YouTubeAPI, CCMixter, FMA];
-
   function withTimeout(promise, ms, controller) {
     return Promise.race([
       promise,
       new Promise(function (_, rej) {
-        const id = setTimeout(function () { rej(new Error('timeout')); }, ms);
-        if (controller) controller.signal.addEventListener('abort', () => { clearTimeout(id); rej(new Error('aborted')); });
+        const id = setTimeout(function () {
+          rej(new Error('timeout'));
+        }, ms);
+        if (controller) {
+          controller.signal.addEventListener('abort', function () {
+            clearTimeout(id);
+            rej(new Error('aborted'));
+          });
+        }
       })
     ]);
   }
@@ -600,7 +1162,10 @@
     const out = [];
     arr.forEach(function (r) {
       const key = (r.kind === 'yt' ? r.ytid : r.url) || (r.title + '|' + r.artist);
-      if (key && !seen[key]) { seen[key] = 1; out.push(r); }
+      if (key && !seen[key]) {
+        seen[key] = 1;
+        out.push(r);
+      }
     });
     return out;
   }
@@ -616,21 +1181,39 @@
   }
 
   async function searchOneSource(src, query) {
-    searching = true; statusMsg = 'Поиск…'; resultsRp = false; render();
+    searching = true;
+    statusMsg = 'Поиск…';
+    resultsRp = false;
+    render();
     searchAbortController = new AbortController();
     try {
       const r = await withTimeout(src.search(query, searchAbortController), 8000, searchAbortController);
-      if (r) { results = [r]; resultsTitle = src.name + ' · трек'; statusMsg = ''; searching = false; queue.push(r); saveQueue(); playIndex(queue.length - 1); return; }
+      if (r) {
+        results = [r];
+        resultsTitle = src.name + ' · трек';
+        statusMsg = '';
+        searching = false;
+        queue.push(r);
+        saveQueue();
+        playIndex(queue.length - 1);
+        return;
+      }
       statusMsg = 'Не найдено: ' + query;
     } catch (e) {
       if (e.message === 'aborted') statusMsg = 'Поиск отменён';
       else statusMsg = src.name + ': ошибка';
     }
-    searching = false; searchAbortController = null; render();
+    searching = false;
+    searchAbortController = null;
+    render();
   }
 
   async function topOneSource(src, query) {
-    searching = true; statusMsg = 'Ищу: ' + src.name + '…'; results = []; resultsRp = false; render();
+    searching = true;
+    statusMsg = 'Ищу: ' + src.name + '…';
+    results = [];
+    resultsRp = false;
+    render();
     searchState = { query: query, scope: 'src', srcIdx: 0, offsets: {}, ytTokens: {}, exhausted: false };
     searchAbortController = new AbortController();
     try {
@@ -643,13 +1226,17 @@
       if (e.message === 'aborted') statusMsg = 'Поиск отменён';
       else statusMsg = src.name + ': ошибка';
     }
-    searching = false; searchAbortController = null; render();
+    searching = false;
+    searchAbortController = null;
+    render();
   }
 
   async function moreOneSource() {
     const src = activeSource();
     if (src === YouTubeLink) return;
-    searching = true; statusMsg = 'Ищу ещё: ' + src.name + '…'; render();
+    searching = true;
+    statusMsg = 'Ищу ещё: ' + src.name + '…';
+    render();
     searchAbortController = new AbortController();
     try {
       const off = searchState.offsets[src.name] || 0;
@@ -663,84 +1250,146 @@
       if (e.message === 'aborted') statusMsg = 'Поиск отменён';
       else statusMsg = src.name + ': ошибка';
     }
-    searching = false; searchAbortController = null; render();
+    searching = false;
+    searchAbortController = null;
+    render();
   }
 
   async function findExactAll(query) {
-    searching = true; statusMsg = 'Общий поиск…'; results = []; resultsRp = false; render();
+    searching = true;
+    statusMsg = 'Общий поиск…';
+    results = [];
+    resultsRp = false;
+    render();
     searchAbortController = new AbortController();
     for (let k = 0; k < ALL_SOURCES.length; k++) {
       const src = ALL_SOURCES[k];
-      statusMsg = 'Ищу: ' + src.name + '…'; render();
+      statusMsg = 'Ищу: ' + src.name + '…';
+      render();
       try {
         const r = await withTimeout(src.search(query, searchAbortController), 6000, searchAbortController);
-        if (r) { results = [r]; resultsTitle = src.name + ' · трек'; statusMsg = ''; searching = false; queue.push(r); saveQueue(); playIndex(queue.length - 1); return; }
+        if (r) {
+          results = [r];
+          resultsTitle = src.name + ' · трек';
+          statusMsg = '';
+          searching = false;
+          queue.push(r);
+          saveQueue();
+          playIndex(queue.length - 1);
+          return;
+        }
       } catch (e) {
-        if (e.message === 'aborted') { statusMsg = 'Поиск отменён'; searching = false; searchAbortController = null; render(); return; }
+        if (e.message === 'aborted') {
+          statusMsg = 'Поиск отменён';
+          searching = false;
+          searchAbortController = null;
+          render();
+          return;
+        }
       }
     }
-    statusMsg = 'Нигде не найдено: ' + query; searching = false; searchAbortController = null; render();
+    statusMsg = 'Нигде не найдено: ' + query;
+    searching = false;
+    searchAbortController = null;
+    render();
   }
 
   async function topAll(query) {
-    searching = true; statusMsg = 'Собираю результаты…'; results = []; resultsRp = false; render();
+    searching = true;
+    statusMsg = 'Собираю результаты…';
+    results = [];
+    resultsRp = false;
+    render();
     searchState = { query: query, scope: 'all', srcIdx: 0, offsets: {}, ytTokens: {}, exhausted: false };
     searchAbortController = new AbortController();
     let acc = [];
     for (let k = 0; k < ALL_SOURCES.length; k++) {
       const src = ALL_SOURCES[k];
-      statusMsg = 'Ищу: ' + src.name + '…'; render();
+      statusMsg = 'Ищу: ' + src.name + '…';
+      render();
       try {
         const arr = await srcMany(src, query, 5, 0, searchAbortController);
         searchState.offsets[src.name] = 5;
-        if (arr && arr.length) { acc = dedupeResults(acc.concat(arr)); results = acc.slice(0, 200); render(); }
+        if (arr && arr.length) {
+          acc = dedupeResults(acc.concat(arr));
+          results = acc.slice(0, 200);
+          render();
+        }
       } catch (e) {
-        if (e.message === 'aborted') { statusMsg = 'Поиск отменён'; searching = false; searchAbortController = null; render(); return; }
+        if (e.message === 'aborted') {
+          statusMsg = 'Поиск отменён';
+          searching = false;
+          searchAbortController = null;
+          render();
+          return;
+        }
       }
     }
     results = acc.slice(0, 200);
     resultsTitle = '«' + query + '» (везде)';
     statusMsg = results.length ? '' : 'Нигде не найдено: ' + query;
-    searching = false; searchAbortController = null; render();
+    searching = false;
+    searchAbortController = null;
+    render();
   }
 
   async function moreAll() {
-    searching = true; statusMsg = 'Ищу ещё…'; render();
+    searching = true;
+    statusMsg = 'Ищу ещё…';
+    render();
     searchAbortController = new AbortController();
     let acc = results.slice();
     const before = acc.length;
     for (let k = 0; k < ALL_SOURCES.length; k++) {
       const src = ALL_SOURCES[k];
-      statusMsg = 'Ищу: ' + src.name + '…'; render();
+      statusMsg = 'Ищу: ' + src.name + '…';
+      render();
       try {
         const off = searchState.offsets[src.name] || 0;
         const arr = await srcMany(src, searchState.query, 5, off, searchAbortController);
         searchState.offsets[src.name] = off + 5;
-        if (arr && arr.length) { acc = dedupeResults(acc.concat(arr)); }
+        if (arr && arr.length) acc = dedupeResults(acc.concat(arr));
       } catch (e) {
-        if (e.message === 'aborted') { statusMsg = 'Поиск отменён'; searching = false; searchAbortController = null; render(); return; }
+        if (e.message === 'aborted') {
+          statusMsg = 'Поиск отменён';
+          searching = false;
+          searchAbortController = null;
+          render();
+          return;
+        }
       }
     }
     results = acc.slice(0, 200);
     statusMsg = (results.length > before) ? '' : 'Больше нет результатов';
     if (results.length === before) searchState.exhausted = true;
-    searching = false; searchAbortController = null; render();
+    searching = false;
+    searchAbortController = null;
+    render();
   }
 
   function searchMore() {
-    if (searchState.scope === 'all') moreAll(); else moreOneSource();
+    if (searchState.scope === 'all') moreAll();
+    else moreOneSource();
   }
 
   function runSearch(query, scope) {
     if (!query) return;
     const exact = hasDash(query);
     if (scope === 'all') {
-      if (cfg.source === 'ytlink') { searchOneSource(YouTubeLink, query); return; }
-      if (exact) findExactAll(query); else topAll(query);
+      if (cfg.source === 'ytlink') {
+        searchOneSource(YouTubeLink, query);
+        return;
+      }
+      if (exact) findExactAll(query);
+      else topAll(query);
     } else {
       const src = activeSource();
-      if (src === YouTubeLink) { searchOneSource(src, query); return; }
-      if (exact) searchOneSource(src, query); else topOneSource(src, query);
+      if (src === YouTubeLink) {
+        searchOneSource(src, query);
+        return;
+      }
+      if (exact) searchOneSource(src, query);
+      else topOneSource(src, query);
     }
   }
 
@@ -755,183 +1404,855 @@
   }
 
   function clearSearch() {
-    results = []; resultsTitle = ''; resultsRp = false; statusMsg = 'Найдите трек'; searching = false;
+    if (resultsRp && Array.isArray(results) && results.length) {
+      results.forEach(function (t) {
+        if (t) {
+          t._rpSuggestedChat = t._rpSuggestedChat || getChatId();
+          markRpRejected(t);
+        }
+      });
+    }
+
+    results = [];
+    resultsTitle = '';
+    resultsRp = false;
+    statusMsg = 'Найдите трек';
+    searching = false;
     searchState = { query: '', scope: 'all', srcIdx: 0, offsets: {}, ytTokens: {}, exhausted: false };
-    if (searchAbortController) { searchAbortController.abort(); searchAbortController = null; }
+
+    if (searchAbortController) {
+      searchAbortController.abort();
+      searchAbortController = null;
+    }
+
     render();
   }
 
   function enqueueResult(r, play) {
     const copy = JSON.parse(JSON.stringify(r));
+
+    if (resultsRp) {
+      copy._rpSuggestedChat = getChatId();
+      if (copy.why && !copy._rpWhy) copy._rpWhy = copy.why;
+    }
+
     queue.push(copy);
     saveQueue();
-    if (resultsRp) { addToRpPlaylist(copy); clearRpPulse(); }
-    if (play) playIndex(queue.length - 1); else render();
+
+    if (resultsRp) {
+      addToRpPlaylist(copy);
+      clearRpPulse();
+    }
+
+    if (play) playIndex(queue.length - 1);
+    else render();
   }
 
-  async function findTrackForRp(query, controller) {
+  async function findTrackForRp(query, controller, extraAvoidSigs) {
     for (let k = 0; k < ALL_SOURCES.length; k++) {
       const src = ALL_SOURCES[k];
+
       try {
-        const r = await withTimeout(src.search(query, controller), 6000, controller);
-        if (r) return r;
-      } catch (e) { if (e.message === 'aborted') throw e; }
+        let candidates = [];
+
+        if (src === YouTubeAPI) {
+          const r = await withTimeout(src.searchMany(query, 6, 0, null, controller), 7000, controller);
+          candidates = r && r.items ? r.items : [];
+        } else if (src.searchMany) {
+          candidates = await withTimeout(src.searchMany(query, 6, 0, controller), 7000, controller);
+        } else {
+          const one = await withTimeout(src.search(query, controller), 7000, controller);
+          candidates = one ? [one] : [];
+        }
+
+        for (let i = 0; i < candidates.length; i++) {
+          const r = candidates[i];
+          if (!r) continue;
+          if (isRpAvoidedCandidate(r, extraAvoidSigs)) continue;
+          return r;
+        }
+      } catch (e) {
+        if (e.message === 'aborted') throw e;
+      }
     }
+
     return null;
   }
 
-  function isYtTrack(t) { return t && (t.kind === 'yt' || t.kind === 'ytlist'); }
-  function curTrack() { return curIdx >= 0 ? queue[curIdx] : null; }
+  function isYtTrack(t) {
+    return t && (t.kind === 'yt' || t.kind === 'ytlist');
+  }
+
+  function curTrack() {
+    return curIdx >= 0 ? queue[curIdx] : null;
+  }
+
+  const badYtIds = {};
+  const badStreamUrls = {};
+
+  function cleanTrackText(s) {
+    return String(s || '')
+      .replace(/\b(official|music video|audio|hd|hq|lyrics|video|visualizer|remaster(ed)?|full album)\b/gi, ' ')
+      .replace(/[()[\]{}]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function trackQuery(t) {
+    if (!t) return '';
+    const a = cleanTrackText(t.artist || '');
+    const ti = cleanTrackText(t.title || '');
+    if (a && ti) return a + ' — ' + ti;
+    return (ti || a || '').trim();
+  }
+
+  function mediaKey(t) {
+    if (!t) return '';
+    if (t.ytid) return 'yt:' + t.ytid;
+    if (t.url) return 'url:' + t.url;
+    return 'txt:' + cleanTrackText((t.artist || '') + '|' + (t.title || '')).toLowerCase();
+  }
+
+  function markBadMedia(t) {
+    if (!t) return;
+    if (t.ytid) badYtIds[t.ytid] = Date.now();
+    if (t.url) badStreamUrls[t.url] = Date.now();
+  }
+
+  function isBadMedia(t) {
+    if (!t) return false;
+    if (t.ytid && badYtIds[t.ytid]) return true;
+    if (t.url && badStreamUrls[t.url]) return true;
+    return false;
+  }
+
+  function isProbablyYtBacked(t) {
+    if (!t) return false;
+    if (t.ytid) return true;
+    const s = String(t.source || '') + ' ' + String(t.url || '');
+    return /youtube|youtu\.be|invidious|piped|nk/i.test(s);
+  }
+
+  async function sourceManyDirect(src, query, limit, controller) {
+    if (!src || src === YouTubeLink) return [];
+    if (src === YouTubeAPI) {
+      const r = await withTimeout(src.searchMany(query, limit || 6, 0, null, controller), 7500, controller);
+      return r && r.items ? r.items : [];
+    }
+    return await withTimeout(src.searchMany(query, limit || 6, 0, controller), 7500, controller);
+  }
+
+  async function findReplacementForTrack(track, controller) {
+    if (!track) return null;
+
+    const baseQ = trackQuery(track);
+    const queries = [];
+    if (baseQ) queries.push(baseQ);
+    if (track.title && track.artist) queries.push(cleanTrackText(track.title + ' ' + track.artist));
+    if (track.title) queries.push(cleanTrackText(track.title));
+
+    const seenQ = {};
+    const uniqQueries = queries.filter(function (q) {
+      q = String(q || '').trim();
+      if (!q || seenQ[q.toLowerCase()]) return false;
+      seenQ[q.toLowerCase()] = 1;
+      return true;
+    });
+
+    const sourceOrder = [Jamendo, Baibai, CCMixter, FMA, YouTubeAPI];
+    const originalKey = mediaKey(track);
+
+    for (let qi = 0; qi < uniqQueries.length; qi++) {
+      const q = uniqQueries[qi];
+
+      for (let si = 0; si < sourceOrder.length; si++) {
+        const src = sourceOrder[si];
+        let arr = [];
+
+        try {
+          arr = await sourceManyDirect(src, q, 6, controller);
+        } catch (e) {
+          if (e && e.message === 'aborted') throw e;
+          arr = [];
+        }
+
+        for (let i = 0; i < arr.length; i++) {
+          const cand = arr[i];
+          if (!cand) continue;
+          if (mediaKey(cand) === originalKey) continue;
+          if (isBadMedia(cand)) continue;
+
+          if (cand.kind === 'audio' && cand.url) {
+            cand._replacementFor = originalKey;
+            return cand;
+          }
+
+          if (cand.kind === 'yt' && cand.ytid) {
+            const streamUrl = await getTrackAudioStream(cand);
+            if (streamUrl) {
+              return {
+                kind: 'audio',
+                url: streamUrl,
+                title: cand.title,
+                artist: cand.artist,
+                source: (cand.source || 'YouTube') + ' → audio',
+                ytid: cand.ytid,
+                _replacementFor: originalKey
+              };
+            }
+
+            const okEmbed = await checkYtEmbedAllowed(cand.ytid);
+            if (okEmbed) {
+              cand._replacementFor = originalKey;
+              return cand;
+            }
+
+            markBadMedia(cand);
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  async function replaceOrSkipTrack(i, oldTrack, playId, reason) {
+    if (playId !== currentPlayId) return;
+    markBadMedia(oldTrack);
+
+    statusMsg = reason || 'Трек недоступен, ищу замену…';
+    render();
+
+    let repl = null;
+    try {
+      repl = await findReplacementForTrack(oldTrack, null);
+    } catch (_) {
+      repl = null;
+    }
+
+    if (playId !== currentPlayId) return;
+    if (i < 0 || i >= queue.length) return;
+
+    if (repl) {
+      repl._autoReplacement = true;
+      queue[i] = repl;
+      saveQueue();
+      statusMsg = 'Нашла рабочую замену…';
+      render();
+      playIndex(i);
+      return;
+    }
+
+    if (queue.length > 1) {
+      statusMsg = 'Трек недоступен, пропускаю…';
+      render();
+      nextTrack();
+      return;
+    }
+
+    stopAudio();
+    stopYt();
+    isPlaying = false;
+    statusMsg = 'Трек недоступен, замена не найдена';
+    render();
+  }
 
   function ytEmbedSrc(t) {
     if (!t) return '';
     let origin = '';
     try { origin = window.location.origin || ''; } catch (_) {}
-    const q = '?autoplay=1&playsinline=1&rel=0' + (origin ? '&origin=' + encodeURIComponent(origin) : '');
+    const q = '?autoplay=1&playsinline=1&rel=0&enablejsapi=1' + (origin ? '&origin=' + encodeURIComponent(origin) : '');
     if (t.kind === 'ytlist') {
       return 'https://www.youtube.com/embed/' + (t.ytid || 'videoseries') + q + '&listType=playlist&list=' + encodeURIComponent(t.ytlist);
     }
     return 'https://www.youtube.com/embed/' + encodeURIComponent(t.ytid) + q;
   }
 
-  function stopAudio() { try { audio.pause(); } catch (_) {} }
-  function stopYt() { ytCurrentEmbed = null; }
+  let ytApiPromise = null;
 
-  function playIndex(i) {
+  function ensureYtIframeApi() {
+    if (window.YT && window.YT.Player) return Promise.resolve();
+    if (ytApiPromise) return ytApiPromise;
+
+    ytApiPromise = new Promise(function (resolve, reject) {
+      const old = window.onYouTubeIframeAPIReady;
+      let done = false;
+
+      window.onYouTubeIframeAPIReady = function () {
+        done = true;
+        try {
+          if (typeof old === 'function') old();
+        } catch (_) {}
+        resolve();
+      };
+
+      try {
+        const exists = document.querySelector('script[src*="youtube.com/iframe_api"]');
+        if (!exists) {
+          const s = document.createElement('script');
+          s.src = 'https://www.youtube.com/iframe_api';
+          s.onerror = function () {
+            if (!done) reject(new Error('yt_iframe_api_load'));
+          };
+          (document.head || document.documentElement).appendChild(s);
+        }
+      } catch (e) {
+        reject(e);
+      }
+
+      setTimeout(function () {
+        if (window.YT && window.YT.Player) resolve();
+        else if (!done) reject(new Error('yt_iframe_api_timeout'));
+      }, 5000);
+    });
+
+    return ytApiPromise;
+  }
+
+    async function checkYtEmbedAllowed(videoId) {
+    if (!videoId) return false;
+
+    try {
+      await ensureYtIframeApi();
+    } catch (_) {
+      return true;
+    }
+
+    return await new Promise(function (resolve) {
+      let done = false;
+      let player = null;
+
+      const holder = document.createElement('div');
+      holder.style.position = 'fixed';
+      holder.style.left = '-9999px';
+      holder.style.top = '-9999px';
+      holder.style.width = '1px';
+      holder.style.height = '1px';
+      holder.style.opacity = '0';
+      holder.style.pointerEvents = 'none';
+      document.body.appendChild(holder);
+
+      function finish(ok) {
+        if (done) return;
+        done = true;
+        try {
+          if (player && player.destroy) player.destroy();
+        } catch (_) {}
+        try { holder.remove(); } catch (_) {}
+        resolve(!!ok);
+      }
+
+      try {
+        player = new window.YT.Player(holder, {
+          width: '1',
+          height: '1',
+          videoId: videoId,
+          playerVars: {
+            autoplay: 0,
+            playsinline: 1,
+            rel: 0,
+            origin: window.location.origin || undefined
+          },
+          events: {
+            onReady: function () {
+              try {
+                if (player && player.mute) player.mute();
+                if (player && player.playVideo) player.playVideo();
+              } catch (_) {}
+
+              setTimeout(function () {
+                finish(true);
+              }, 1800);
+            },
+            onStateChange: function () {
+              setTimeout(function () {
+                finish(true);
+              }, 300);
+            },
+            onError: function (ev) {
+              const code = ev && typeof ev.data !== 'undefined' ? Number(ev.data) : 0;
+              if ([2, 5, 100, 101, 150, 153].indexOf(code) >= 0) finish(false);
+              else finish(false);
+            }
+          }
+        });
+      } catch (_) {
+        finish(true);
+      }
+
+      setTimeout(function () {
+        finish(true);
+      }, 3500);
+    });
+  }
+
+  function stopAudio() {
+    try { audio.pause(); } catch (_) {}
+  }
+
+  function stopYt() {
+    ytCurrentEmbed = null;
+  }
+
+  function fallbackToYtIframe(t) {
+    stopAudio();
+    isPlaying = true;
+    statusMsg = '';
+    ytCurrentEmbed = ytEmbedSrc(t);
+    render();
+  }
+
+  async function playIndex(i) {
     if (i < 0 || i >= queue.length) return;
-    curIdx = i; saveQueue();
+
+    curIdx = i;
+    saveQueue();
+
     const t = queue[i];
     statusMsg = '';
-    if (isYtTrack(t)) {
+    audioCurrentTime = 0;
+    audioDuration = 0;
+    currentPlayId++;
+    const playId = currentPlayId;
+
+    try { window.__rpRadioNow = null; } catch (_) {}
+
+    if (t.kind === 'yt') {
       stopAudio();
-      isPlaying = true;
-      ytCurrentEmbed = ytEmbedSrc(t);
-      render();
-    } else {
       stopYt();
-      audio.src = t.url;
-      audio.play().then(function () { isPlaying = true; render(); })
-        .catch(function (e) { isPlaying = false; statusMsg = 'Ошибка воспроизведения'; render(); });
+      isPlaying = false;
+      statusMsg = 'Проверяю аудио YouTube…';
       render();
+
+      const streamUrl = await getTrackAudioStream(t);
+      if (playId !== currentPlayId) return;
+
+      if (streamUrl) {
+        statusMsg = '';
+        audio.src = streamUrl;
+        audio.play().then(function () {
+          if (playId !== currentPlayId) return;
+          isPlaying = true;
+          render();
+        }).catch(async function () {
+          if (playId !== currentPlayId) return;
+          markBadMedia({ url: streamUrl, ytid: t.ytid });
+
+          statusMsg = 'Аудиопоток умер, проверяю YouTube embed…';
+          render();
+
+          const embedOk = await checkYtEmbedAllowed(t.ytid);
+          if (playId !== currentPlayId) return;
+
+          if (embedOk) {
+            statusMsg = 'Аудио недоступно, запускаю YouTube-плеер…';
+            render();
+            fallbackToYtIframe(t);
+          } else {
+            await replaceOrSkipTrack(i, t, playId, 'YouTube запретил воспроизведение, ищу другой трек…');
+          }
+        });
+        render();
+        return;
+      }
+
+      statusMsg = 'Аудио не вытащилось, проверяю YouTube embed…';
+      render();
+
+      const embedOk = await checkYtEmbedAllowed(t.ytid);
+      if (playId !== currentPlayId) return;
+
+      if (embedOk) {
+        statusMsg = 'Аудио недоступно, запускаю YouTube-плеер…';
+        render();
+        fallbackToYtIframe(t);
+      } else {
+        await replaceOrSkipTrack(i, t, playId, 'YouTube запретил embed, ищу замену…');
+      }
+
+      return;
     }
+
+    if (t.kind === 'ytlist') {
+      fallbackToYtIframe(t);
+      return;
+    }
+
+    stopYt();
+
+    if (!t.url) {
+      await replaceOrSkipTrack(i, t, playId, 'У трека нет аудио-ссылки, ищу замену…');
+      return;
+    }
+
+    audio.src = t.url;
+
+    audio.play().then(function () {
+      if (playId !== currentPlayId) return;
+      isPlaying = true;
+      statusMsg = '';
+      render();
+    }).catch(async function () {
+      if (playId !== currentPlayId) return;
+
+      markBadMedia(t);
+
+      if (isProbablyYtBacked(t)) statusMsg = 'Поток устарел, заново ищу через Invidious/Piped/фолбэки…';
+      else statusMsg = 'Ошибка потока, ищу рабочую замену…';
+      render();
+
+      const repl = await findReplacementForTrack(t, null);
+      if (playId !== currentPlayId) return;
+
+      if (repl) {
+        queue[i] = repl;
+        saveQueue();
+        playIndex(i);
+        return;
+      }
+
+      isPlaying = false;
+      statusMsg = 'Ошибка воспроизведения';
+      render();
+    });
+
+    render();
   }
 
   function togglePlay() {
     if (curIdx < 0) {
-      if (window.__rpRadioNow) { if (isPlaying) { audio.pause(); isPlaying = false; } else { audio.play(); isPlaying = true; } updatePlayBtn(); return; }
-      statusMsg = 'Сначала найдите трек'; render(); return;
+      if (window.__rpRadioNow) {
+        if (isPlaying) {
+          audio.pause();
+          isPlaying = false;
+        } else {
+          audio.play().then(function () {
+            isPlaying = true;
+            updatePlayBtn();
+          }).catch(function () {
+            isPlaying = false;
+            statusMsg = 'Радио недоступно';
+            render();
+          });
+        }
+        updatePlayBtn();
+        return;
+      }
+
+      statusMsg = 'Сначала найдите трек';
+      render();
+      return;
     }
+
     const t = queue[curIdx];
-    if (isYtTrack(t)) { statusMsg = ''; return; }
-    if (isPlaying) { audio.pause(); isPlaying = false; } else { audio.play(); isPlaying = true; }
-    updatePlayBtn();
-  }
-  function nextTrack() { if (queue.length) playIndex((curIdx + 1) % queue.length); }
-  function prevTrack() { if (queue.length) playIndex((curIdx - 1 + queue.length) % queue.length); }
-  function removeFromQueue(i) {
-    if (i < 0 || i >= queue.length) return;
-    const wasCur = (i === curIdx);
-    queue.splice(i, 1);
-    if (i < curIdx) curIdx--;
-    else if (wasCur) {
-      if (queue.length === 0) { curIdx = -1; stopAudio(); stopYt(); isPlaying = false; statusMsg = 'Очередь пуста'; saveQueue(); render(); return; }
-      else { if (curIdx >= queue.length) curIdx = 0; saveQueue(); playIndex(curIdx); return; }
+
+    if (isYtTrack(t) && ytCurrentEmbed) {
+      statusMsg = '';
+      return;
     }
-    saveQueue(); render();
+
+    if (isPlaying) {
+      audio.pause();
+      isPlaying = false;
+      updatePlayBtn();
+      return;
+    }
+
+    if (isYtTrack(t) || isProbablyYtBacked(t) || !audio.src) {
+      playIndex(curIdx);
+      return;
+    }
+
+    audio.play().then(function () {
+      isPlaying = true;
+      updatePlayBtn();
+    }).catch(function () {
+      playIndex(curIdx);
+    });
   }
+
+  function nextTrack() {
+    if (queue.length) playIndex((curIdx + 1) % queue.length);
+  }
+
+  function prevTrack() {
+    if (queue.length) playIndex((curIdx - 1 + queue.length) % queue.length);
+  }
+
+    function removeFromQueue(i) {
+    if (i < 0 || i >= queue.length) return;
+
+    const removed = queue[i];
+    const wasCur = (i === curIdx);
+
+    if (removed && removed._rpSuggestedChat === getChatId()) markRpRejected(removed);
+
+    queue.splice(i, 1);
+
+    if (i < curIdx) {
+      curIdx--;
+    } else if (wasCur) {
+      currentPlayId++;
+
+      if (queue.length === 0) {
+        curIdx = -1;
+        stopAudio();
+        stopYt();
+
+        try {
+          audio.removeAttribute('src');
+          audio.load();
+        } catch (_) {}
+
+        isPlaying = false;
+        statusMsg = 'Очередь пуста';
+        saveQueue();
+        render();
+        return;
+      } else {
+        if (curIdx >= queue.length) curIdx = 0;
+        saveQueue();
+        playIndex(curIdx);
+        return;
+      }
+    }
+
+    saveQueue();
+    render();
+  }
+
+    function clearQueue() {
+    if (!queue.length) return;
+
+    currentPlayId++;
+
+    queue.forEach(function (t) {
+      if (t && t._rpSuggestedChat === getChatId()) markRpRejected(t);
+    });
+
+    queue = [];
+    curIdx = -1;
+    stopAudio();
+    stopYt();
+
+    try {
+      audio.removeAttribute('src');
+      audio.load();
+    } catch (_) {}
+
+    isPlaying = false;
+    statusMsg = 'Очередь очищена';
+    saveQueue();
+    render();
+  }
+
   function renameItem(i) {
     if (i < 0 || i >= queue.length) return;
     const cur = queue[i].title || '';
     let nv = null;
     try { nv = window.prompt('Название:', cur); } catch (_) {}
-    if (nv !== null && String(nv).trim()) { queue[i].title = String(nv).trim(); saveQueue(); render(); }
+    if (nv !== null && String(nv).trim()) {
+      queue[i].title = String(nv).trim();
+      saveQueue();
+      render();
+    }
   }
 
   function flashPlaylist(id) {
     flashPlId = id;
     render();
-    setTimeout(function () { flashPlId = null; render(); }, 1200);
+    setTimeout(function () {
+      flashPlId = null;
+      render();
+    }, 1200);
   }
+
   function addTrackToManual(plId, track) {
     const p = lib.manual.find(function (x) { return x.id === plId; });
     if (!p || !track) return;
+
     if (!Array.isArray(p.tracks)) p.tracks = [];
-    p.tracks.push(JSON.parse(JSON.stringify(track)));
-    saveLib(); flashPlaylist(plId);
+
+    const copy = JSON.parse(JSON.stringify(track));
+    if (resultsRp) {
+      copy._rpSuggestedChat = getChatId();
+      if (copy.why && !copy._rpWhy) copy._rpWhy = copy.why;
+    }
+
+    p.tracks.push(copy);
+    saveLib();
+    flashPlaylist(plId);
   }
+
   function createManualFromQueue() {
-    if (!queue.length) { statusMsg = 'Очередь пуста'; render(); return; }
+    if (!queue.length) {
+      statusMsg = 'Очередь пуста';
+      render();
+      return;
+    }
     let nm = null;
     try { nm = window.prompt('Название плейлиста:', 'Мой плейлист'); } catch (_) {}
     if (nm === null || !String(nm).trim()) return;
     lib.manual.push({ id: 'm' + Date.now(), name: String(nm).trim(), tracks: JSON.parse(JSON.stringify(queue)) });
-    saveLib(); render();
+    saveLib();
+    render();
   }
+
   function createManualFromTrack(track) {
     if (!track) return;
+
     let nm = null;
     try { nm = window.prompt('Название нового плейлиста:', 'Мой плейлист'); } catch (_) {}
+
     if (nm === null || !String(nm).trim()) return;
-    lib.manual.push({ id: 'm' + Date.now(), name: String(nm).trim(), tracks: [JSON.parse(JSON.stringify(track))] });
-    saveLib(); render();
+
+    const copy = JSON.parse(JSON.stringify(track));
+    if (resultsRp) {
+      copy._rpSuggestedChat = getChatId();
+      if (copy.why && !copy._rpWhy) copy._rpWhy = copy.why;
+    }
+
+    lib.manual.push({
+      id: 'm' + Date.now(),
+      name: String(nm).trim(),
+      tracks: [copy]
+    });
+
+    saveLib();
+    render();
   }
+
   function saveCurrentAsRp() {
-    if (!queue.length) { statusMsg = 'Очередь пуста'; render(); return; }
+    if (!queue.length) {
+      statusMsg = 'Очередь пуста';
+      render();
+      return;
+    }
+
     const cid = getChatId();
     if (!lib.rp[cid]) lib.rp[cid] = { name: getChatName() + ' ' + dateStamp(), tracks: [] };
-    lib.rp[cid].tracks = JSON.parse(JSON.stringify(queue));
-    saveLib(); render();
+
+    lib.rp[cid].tracks = JSON.parse(JSON.stringify(queue)).map(function (t) {
+      if (t && t._rpSuggestedChat === undefined && resultsRp) t._rpSuggestedChat = cid;
+      return t;
+    });
+
+    saveLib();
+    render();
   }
+
   function addToRpPlaylist(track) {
     if (!track) return;
+
     const cid = getChatId();
     if (!lib.rp[cid]) lib.rp[cid] = { name: getChatName() + ' ' + dateStamp(), tracks: [] };
     if (!Array.isArray(lib.rp[cid].tracks)) lib.rp[cid].tracks = [];
+
+    const copy = JSON.parse(JSON.stringify(track));
+    copy._rpSuggestedChat = cid;
+    if (copy.why && !copy._rpWhy) copy._rpWhy = copy.why;
+
+    const sig = rpTrackSig(copy);
+
     const exists = lib.rp[cid].tracks.some(function (x) {
-      return (x.kind === 'yt' ? x.ytid === track.ytid : x.url === track.url);
+      const xsig = rpTrackSig(x);
+      if (sig && xsig && sig === xsig) return true;
+
+      if (x.kind === 'yt' && copy.kind === 'yt' && x.ytid && copy.ytid) return x.ytid === copy.ytid;
+      if (x.url && copy.url) return x.url === copy.url;
+
+      return false;
     });
-    if (!exists) { lib.rp[cid].tracks.push(JSON.parse(JSON.stringify(track))); saveLib(); }
+
+    if (!exists) {
+      lib.rp[cid].tracks.push(copy);
+      saveLib();
+    }
   }
+
   function loadPlaylist(tracks) {
     if (!Array.isArray(tracks) || !tracks.length) return;
+
+    stopAudio();
+    stopYt();
+
     queue = JSON.parse(JSON.stringify(tracks));
+    curIdx = -1;
     saveQueue();
+
     playIndex(0);
   }
+
   function renamePlaylistManual(id) {
     const p = lib.manual.find(function (x) { return x.id === id; });
     if (!p) return;
     let nv = null;
     try { nv = window.prompt('Название плейлиста:', p.name); } catch (_) {}
-    if (nv !== null && String(nv).trim()) { p.name = String(nv).trim(); saveLib(); render(); }
+    if (nv !== null && String(nv).trim()) {
+      p.name = String(nv).trim();
+      saveLib();
+      render();
+    }
   }
+
   function renamePlaylistRp(cid) {
     const p = lib.rp[cid];
     if (!p) return;
     let nv = null;
     try { nv = window.prompt('Название плейлиста:', p.name); } catch (_) {}
-    if (nv !== null && String(nv).trim()) { p.name = String(nv).trim(); saveLib(); render(); }
+    if (nv !== null && String(nv).trim()) {
+      p.name = String(nv).trim();
+      saveLib();
+      render();
+    }
   }
-  function deleteManual(id) { lib.manual = lib.manual.filter(function (p) { return p.id !== id; }); saveLib(); render(); }
-  function deleteRp(cid) { delete lib.rp[cid]; saveLib(); render(); }
+
+  function deleteManual(id) {
+    lib.manual = lib.manual.filter(function (p) { return p.id !== id; });
+    saveLib();
+    render();
+  }
+
+  function deleteRp(cid) {
+    delete lib.rp[cid];
+    saveLib();
+    render();
+  }
+
   function deleteTrackFromManual(plId, idx) {
     const p = lib.manual.find(function (x) { return x.id === plId; });
     if (!p || !Array.isArray(p.tracks)) return;
+
+    const removed = p.tracks[idx];
+    if (removed && removed._rpSuggestedChat === getChatId()) markRpRejected(removed);
+
     p.tracks.splice(idx, 1);
-    saveLib(); render();
+    saveLib();
+    render();
   }
+
   function deleteTrackFromRp(cid, idx) {
     const p = lib.rp[cid];
     if (!p || !Array.isArray(p.tracks)) return;
+
+    const removed = p.tracks[idx];
+    if (cid === getChatId() && removed) markRpRejected(removed);
+
     p.tracks.splice(idx, 1);
-    saveLib(); render();
+    saveLib();
+    render();
   }
 
   function clearRpPulse() {
-    if (rpPulse) { rpPulse = false; if (root) root.classList.remove(PFX + '-pulse'); }
+    if (rpPulse) {
+      rpPulse = false;
+      if (root) root.classList.remove(PFX + '-pulse');
+    }
   }
+
   function setRpPulse() {
-    rpPulse = true; if (root) root.classList.add(PFX + '-pulse');
+    rpPulse = true;
+    if (root) root.classList.add(PFX + '-pulse');
   }
 
   function getProfiles() {
@@ -943,6 +2264,7 @@
     } catch (_) {}
     return [];
   }
+
   function selectedProfileId() {
     if (cfg.rpProfile) return cfg.rpProfile;
     const c = stContext();
@@ -952,6 +2274,7 @@
     } catch (_) {}
     return '';
   }
+
   function profileName(id) {
     if (!id) return 'Текущий профиль';
     const p = getProfiles().find(function (x) { return x.id === id; });
@@ -961,7 +2284,9 @@
   function getRecentMessages(n) {
     const c = stContext();
     if (!c || !Array.isArray(c.chat)) return [];
-    const arr = c.chat.filter(function (m) { return m && !m.is_system && typeof m.mes === 'string' && m.mes.trim(); });
+    const arr = c.chat.filter(function (m) {
+      return m && !m.is_system && typeof m.mes === 'string' && m.mes.trim();
+    });
     const slice = arr.slice(-n);
     return slice.map(function (m) {
       const who = m.is_user ? 'User' : (m.name || 'Char');
@@ -974,27 +2299,130 @@
     });
   }
 
-  function langLine() {
+    function langLine() {
     let lang = cfg.rpLang;
     if (lang === 'custom') lang = (cfg.rpLangCustom || '').trim();
     if (!lang) return '';
     return '- Prefer tracks with lyrics in ' + lang + '.';
   }
 
-  function getRecentlyPicked() {
+  function normTrackPart(s) {
+    return String(s || '')
+      .toLowerCase()
+      .replace(/&amp;/g, '&')
+      .replace(/\b(official|music video|audio|hd|hq|lyrics|video|visualizer|remaster(ed)?|feat\.?|ft\.)\b/gi, ' ')
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function rpTrackSigFromParts(artist, title) {
+    const a = normTrackPart(artist);
+    const t = normTrackPart(title);
+    if (!a && !t) return '';
+    return a + ' — ' + t;
+  }
+
+  function rpTrackSig(track) {
+    if (!track) return '';
+    return rpTrackSigFromParts(track.artist || '', track.title || track.track || '');
+  }
+
+  function rpTrackHuman(track) {
+    if (!track) return '';
+    const a = String(track.artist || '').trim();
+    const t = String(track.title || track.track || '').trim();
+    if (a && t) return a + ' — ' + t;
+    return t || a;
+  }
+
+  function markRpRejected(track) {
+    const sig = rpTrackSig(track);
+    if (!sig) return;
+
     const cid = getChatId();
+    if (!rpRejected[cid]) rpRejected[cid] = [];
+    if (rpRejected[cid].indexOf(sig) < 0) {
+      rpRejected[cid].push(sig);
+      rpRejected[cid] = rpRejected[cid].slice(-300);
+      saveRpRejected();
+    }
+  }
+
+  function getRejectedRpSigs() {
+    const cid = getChatId();
+    return Array.isArray(rpRejected[cid]) ? rpRejected[cid].slice() : [];
+  }
+
+  function collectPlaylistTracks() {
     const out = [];
+
     try {
-      const p = lib.rp[cid];
-      if (p && Array.isArray(p.tracks)) {
-        p.tracks.slice(-40).forEach(function (t) {
-          const a = (t.artist || '').trim();
-          const ti = (t.title || '').trim();
-          if (ti) out.push((a ? a + ' — ' : '') + ti);
+      if (Array.isArray(queue)) {
+        queue.forEach(function (t) {
+          if (t) out.push(t);
         });
       }
     } catch (_) {}
+
+    try {
+      if (lib && Array.isArray(lib.manual)) {
+        lib.manual.forEach(function (p) {
+          if (p && Array.isArray(p.tracks)) {
+            p.tracks.forEach(function (t) {
+              if (t) out.push(t);
+            });
+          }
+        });
+      }
+    } catch (_) {}
+
+    try {
+      if (lib && lib.rp) {
+        Object.keys(lib.rp).forEach(function (cid) {
+          const p = lib.rp[cid];
+          if (p && Array.isArray(p.tracks)) {
+            p.tracks.forEach(function (t) {
+              if (t) out.push(t);
+            });
+          }
+        });
+      }
+    } catch (_) {}
+
     return out;
+  }
+
+  function getRpAvoidSigs() {
+    const map = {};
+    collectPlaylistTracks().forEach(function (t) {
+      const sig = rpTrackSig(t);
+      if (sig) map[sig] = rpTrackHuman(t);
+    });
+
+    getRejectedRpSigs().forEach(function (sig) {
+      if (sig && !map[sig]) map[sig] = sig;
+    });
+
+    return Object.keys(map);
+  }
+
+  function getRecentlyPicked() {
+    return getRpAvoidSigs();
+  }
+
+  function isRpAvoidedCandidate(track, extraAvoidSigs) {
+    const sig = rpTrackSig(track);
+    if (!sig) return false;
+
+    const avoid = getRpAvoidSigs();
+    if (Array.isArray(extraAvoidSigs)) {
+      extraAvoidSigs.forEach(function (x) {
+        if (x) avoid.push(x);
+      });
+    }
+
+    return avoid.indexOf(sig) >= 0;
   }
 
   function buildRpPrompt(count, messages, avoidList) {
@@ -1015,9 +2443,10 @@
 
     let avoidReq = '';
     if (avoidList && avoidList.length) {
-      avoidReq = '\nDO NOT REPEAT these already-suggested tracks (pick completely different ones):\n' +
+      avoidReq = '\nDO NOT REPEAT these exact artist+track pairs. Repeating an artist is allowed ONLY if the track title is different:\n' +
         avoidList.map(function (x) { return '- ' + x; }).join('\n') + '\n';
     }
+
     const seed = Math.floor(Math.random() * 100000);
 
     const sys =
@@ -1026,10 +2455,11 @@
       'Analyze the mood, emotions, atmosphere, tempo, narrative and the DIRECT SPEECH of the characters (User and Char) in the recent messages.\n' +
       'Suggest ' + count + ' real, existing music track(s) that capture the EMOTIONAL TONE of the current scene.\n\n' +
       'Rules:\n' +
-      '- Only REAL, well-known existing tracks (artist + title), findable on YouTube. Never invent tracks.\n' +
+      '- Only REAL, existing tracks (artist + title), findable on YouTube or major music sources. Never invent tracks.\n' +
       '- ONLY actual songs or instrumental pieces. NEVER jingles, ringtones, sound effects, ad music, memes, children songs, novelty audio.\n' +
       '- Emotional tone of the track MUST match the scene (dramatic=intense, sad=melancholic, tense=dark, romantic=tender).\n' +
-      '- Use different artists.\n' +
+      '- You MAY repeat an artist if the track title is different.\n' +
+      '- You MUST NOT repeat the exact same artist + track pair from the exclusion list.\n' +
       (lang ? '- REMINDER: ALL tracks MUST be in ' + lang + '. No exceptions.\n' : '') +
       avoidReq +
       '\n(variation token, ignore: ' + seed + ')\n' +
@@ -1037,6 +2467,7 @@
       '{"tracks":[{"artist":"...","track":"...","lang":"' + (lang || 'any') + '","why":"<пояснение на русском, 1 предложение>"}]}\n\n' +
       'Recent messages:\n' + messages.join('\n') +
       langHard;
+
     return sys;
   }
 
@@ -1045,21 +2476,31 @@
     let s = String(text).trim();
     s = s.replace(/```json/gi, '').replace(/```/g, '').trim();
     let obj = null;
-    try { obj = JSON.parse(s); } catch (_) {
+    try {
+      obj = JSON.parse(s);
+    } catch (_) {
       const m = s.match(/\{[\s\S]*\}/);
-      if (m) { try { obj = JSON.parse(m[0]); } catch (_) {} }
+      if (m) {
+        try { obj = JSON.parse(m[0]); } catch (_) {}
+      }
     }
     if (!obj || !Array.isArray(obj.tracks)) return [];
-    return obj.tracks.filter(function (t) { return t && t.artist && t.track; }).map(function (t) {
-      return { artist: String(t.artist).trim(), track: String(t.track).trim(), why: String(t.why || '').trim() };
+    return obj.tracks.filter(function (t) {
+      return t && t.artist && t.track;
+    }).map(function (t) {
+      return {
+        artist: String(t.artist).trim(),
+        track: String(t.track).trim(),
+        why: String(t.why || '').trim()
+      };
     });
   }
 
-    async function callModel(prompt) {
+  async function callModel(prompt) {
     const c = stContext();
     if (!c) throw new Error('no ST context');
     const profId = selectedProfileId();
-    
+
     const maxTok = cfg.rpTokenLimitOn ? (parseInt(cfg.rpTokenLimit, 10) || 6000) : undefined;
 
     if (profId && c.ConnectionManagerRequestService && c.ConnectionManagerRequestService.sendRequest) {
@@ -1071,47 +2512,96 @@
           return (resp.choices[0].message && resp.choices[0].message.content) || resp.choices[0].text || '';
         }
         return '';
-      } catch (e) { console.warn('[RP_Player] CMRS error, fallback', e); }
+      } catch (e) {
+        console.warn('[RP_Player] CMRS error, fallback', e);
+      }
     }
+
     if (c.generateQuietPrompt) {
       const r = await c.generateQuietPrompt(prompt, false, false);
       return (typeof r === 'string') ? r : '';
     }
+
     throw new Error('no generation method');
   }
+
   async function runRpAnalysis(count, msgCount, mode) {
     if (rpBusy) return;
-    rpBusy = true; searching = true;
-    if (!collapsed) { rpOpen = true; }
-    statusMsg = 'ИИ подбирает музыку…'; resultsRp = true; results = [];
+
+    rpBusy = true;
+    searching = true;
+
+    if (!collapsed) rpOpen = true;
+
+    statusMsg = 'ИИ подбирает музыку…';
+    resultsRp = true;
+    results = [];
     rpAbortController = new AbortController();
     render();
+
     try {
       const messages = getRecentMessages(msgCount);
-      if (!messages.length) { statusMsg = 'Нет сообщений для анализа'; rpBusy = false; searching = false; rpAbortController = null; render(); return; }
-      const avoid = getRecentlyPicked();
+      if (!messages.length) {
+        statusMsg = 'Нет сообщений для анализа';
+        rpBusy = false;
+        searching = false;
+        rpAbortController = null;
+        render();
+        return;
+      }
+
+      const avoid = getRpAvoidSigs();
       const prompt = buildRpPrompt(count, messages, avoid);
       const raw = await callModel(prompt);
       const picks = parseRpJson(raw);
-      if (!picks.length) { statusMsg = 'ИИ не вернул треки (проверьте профиль)'; rpBusy = false; searching = false; rpAbortController = null; render(); return; }
 
-      results = []; resultsTitle = 'Вайб сцены';
-      statusMsg = 'Ищу треки (' + picks.length + ')…'; render();
-      const found = await Promise.all(picks.map(function (p) {
-        return findTrackForRp(p.artist + ' — ' + p.track, rpAbortController).then(function (r) {
-          if (r) { r.why = p.why; }
-          return r;
-        }).catch(function (e) {
+      if (!picks.length) {
+        statusMsg = 'ИИ не вернул треки (проверьте профиль)';
+        rpBusy = false;
+        searching = false;
+        rpAbortController = null;
+        render();
+        return;
+      }
+
+      results = [];
+      resultsTitle = 'Вайб сцены';
+      statusMsg = 'Ищу треки (' + picks.length + ')…';
+      render();
+
+      const usedSigs = avoid.slice();
+      const found = [];
+
+      for (let i = 0; i < picks.length; i++) {
+        const p = picks[i];
+        const sig = rpTrackSigFromParts(p.artist, p.track);
+
+        if (sig && usedSigs.indexOf(sig) >= 0) continue;
+
+        try {
+          const r = await findTrackForRp(p.artist + ' — ' + p.track, rpAbortController, usedSigs);
+          if (r) {
+            r.why = p.why;
+            r._rpSuggestedChat = getChatId();
+            found.push(r);
+
+            const rsig = rpTrackSig(r) || sig;
+            if (rsig && usedSigs.indexOf(rsig) < 0) usedSigs.push(rsig);
+          }
+        } catch (e) {
           if (e.message === 'aborted') throw e;
-          return null;
-        });
-      }));
+        }
+      }
+
       results = found.filter(Boolean);
       render();
-      if (!results.length) { statusMsg = 'ИИ предложил треки, но их не нашли в источниках'; }
-      else {
+
+      if (!results.length) {
+        statusMsg = 'ИИ предложил треки, но их не нашли или они были в исключениях';
+      } else {
         statusMsg = '';
         setRpPulse();
+
         if (mode === 'quick' && cfg.rpQuickAutoplay && results.length) {
           enqueueResult(results[0], true);
         }
@@ -1120,13 +2610,25 @@
       if (e.message === 'aborted') statusMsg = 'Операция отменена';
       else statusMsg = 'Ошибка ИИ: ' + (e && e.message ? e.message : 'unknown');
     }
-    rpBusy = false; searching = false; rpAbortController = null; render();
+
+    rpBusy = false;
+    searching = false;
+    rpAbortController = null;
+    render();
   }
 
   function rpQuickVibe() {
-    if (!cfg.rpQuick) { if (!collapsed) { rpOpen = true; statusMsg = 'Включите быстрый режим в РП-настройках'; } render(); return; }
+    if (!cfg.rpQuick) {
+      if (!collapsed) {
+        rpOpen = true;
+        statusMsg = 'Включите быстрый режим в РП-настройках';
+      }
+      render();
+      return;
+    }
     runRpAnalysis(1, 3, 'quick');
   }
+
   function rpAutoTrigger() {
     if (!cfg.rpAuto || rpBusy) return;
     runRpAnalysis(Math.max(1, cfg.rpCount || 5), Math.max(2, cfg.rpEvery || 10), 'auto');
@@ -1144,6 +2646,7 @@
   }
 
   let rpMsgCounter = 0;
+
   function onChatMessage() {
     if (!cfg.rpAuto) return;
     rpMsgCounter++;
@@ -1153,13 +2656,43 @@
     }
   }
 
-  audio.addEventListener('ended', function () {
-    if (curIdx >= 0 && queue[curIdx] && queue[curIdx].kind === 'audio') {
-      if (queue.length > 1) nextTrack(); else { isPlaying = false; updatePlayBtn(); }
+   audio.addEventListener('error', function () {
+    const t = curTrack();
+    if (!t || curIdx < 0) return;
+    if (!audio.src && !isYtTrack(t)) return;
+
+    const playId = currentPlayId;
+    markBadMedia(t);
+
+    if (isYtTrack(t) || isProbablyYtBacked(t)) {
+      replaceOrSkipTrack(curIdx, t, playId, 'Поток оборвался, ищу рабочую замену…');
+    } else {
+      statusMsg = 'Ошибка аудио, пробую найти замену…';
+      render();
+      replaceOrSkipTrack(curIdx, t, playId, 'Ошибка аудио, ищу замену…');
     }
   });
-  audio.addEventListener('pause', function () { isPlaying = false; updatePlayBtn(); });
-  audio.addEventListener('play', function () { isPlaying = true; updatePlayBtn(); });
+
+
+  audio.addEventListener('ended', function () {
+    if (curIdx >= 0 && queue[curIdx]) {
+      if (queue.length > 1) nextTrack();
+      else {
+        isPlaying = false;
+        updatePlayBtn();
+      }
+    }
+  });
+
+  audio.addEventListener('pause', function () {
+    isPlaying = false;
+    updatePlayBtn();
+  });
+
+  audio.addEventListener('play', function () {
+    isPlaying = true;
+    updatePlayBtn();
+  });
 
   const ICONS = {
     music: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${PFX}-ic"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
@@ -1190,24 +2723,61 @@
     cancelX: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" class="${PFX}-ic"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`
   };
 
-  function saveTheme() { cfg.theme = theme; saveCfg(); }
+  function saveTheme() {
+    cfg.theme = theme;
+    saveCfg();
+  }
+
   (function migrateBg() {
     try {
       if ((cfg.bgBase64 || cfg.bgUrl) && (!cfg.bgByTheme[theme])) {
         cfg.bgByTheme[theme] = { base64: cfg.bgBase64 || '', url: cfg.bgUrl || '' };
       }
-      cfg.bgBase64 = ''; cfg.bgUrl = ''; cfg.bgType = 'none';
+      cfg.bgBase64 = '';
+      cfg.bgUrl = '';
+      cfg.bgType = 'none';
       saveCfg();
     } catch (e) {}
   })();
 
-  function validHex(v) { return /^#?[0-9a-fA-F]{6}$/.test(String(v || '').trim()); }
-  function normHex(v) { v = String(v || '').trim(); if (v[0] !== '#') v = '#' + v; return v.toLowerCase(); }
-  function accentColor() { return validHex(cfg.accent) ? normHex(cfg.accent) : ''; }
+  function validHex(v) {
+    return /^#?[0-9a-fA-F]{6}$/.test(String(v || '').trim());
+  }
+
+  function normHex(v) {
+    v = String(v || '').trim();
+    if (v[0] !== '#') v = '#' + v;
+    return v.toLowerCase();
+  }
+
+  function accentColor() {
+    var c = cfg.accentByTheme && cfg.accentByTheme[theme];
+    if (validHex(c)) return normHex(c);
+    if (validHex(cfg.accent)) return normHex(cfg.accent);
+    return '';
+  }
+
   function setAccent(v) {
-    if (!v) { cfg.accent = ''; }
-    else if (validHex(v)) { cfg.accent = normHex(v); }
+    if (!v) cfg.accent = '';
+    else if (validHex(v)) cfg.accent = normHex(v);
     saveCfg();
+  }
+
+  function setAccentForTheme(themeId, hex) {
+    if (!themeId) return;
+    if (hex && validHex(hex)) cfg.accentByTheme[themeId] = normHex(hex);
+    else delete cfg.accentByTheme[themeId];
+    saveCfg();
+    applyAccentVar();
+  }
+
+  function setAccentForAll(hex) {
+    THEMES.forEach(function (tm) {
+      if (hex && validHex(hex)) cfg.accentByTheme[tm] = normHex(hex);
+      else delete cfg.accentByTheme[tm];
+    });
+    saveCfg();
+    applyAccentVar();
   }
 
   function applyAccentVar() {
@@ -1234,10 +2804,12 @@
     }
   }
 
-  function rpEnabled() { return cfg.rpAuto || cfg.rpQuick; }
+  function rpEnabled() {
+    return cfg.rpAuto || cfg.rpQuick;
+  }
 
-  const CSS = `
-  .${PFX}-root { position: fixed; z-index: 99998; box-sizing: border-box; font-family: ...; color: #f0f0f5; -webkit-user-select: none; user-select: none; touch-action: none; overflow: visible; border-radius: 16px; display: flex; flex-direction: column; }
+   const CSS = `
+  .${PFX}-root { position: fixed; z-index: 99998; box-sizing: border-box; font-family: Arial, sans-serif; color: var(--rp-text, #f0f0f5); -webkit-user-select: none; user-select: none; touch-action: none; overflow: visible; border-radius: 16px; display: flex; flex-direction: column; }
   .${PFX}-root *, .${PFX}-root *::before, .${PFX}-root *::after { box-sizing: border-box; }
   .${PFX}-root.dragging { transition: none !important; }
   .${PFX}-root.dragging * { cursor: grabbing !important; }
@@ -1250,12 +2822,13 @@
   .${PFX}-shell { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .${PFX}-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .${PFX}-glass { background: rgba(30,30,40,var(--rp-bg-alpha, 0.92)); backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%); border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 12px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.1); border-radius: 16px; overflow: hidden; }
-  
+
   .${PFX}-progress-container { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
   .${PFX}-time-lbl { font-size: 10px; opacity: 0.6; min-width: 28px; text-align: center; font-family: monospace; }
   .${PFX}-progress-slider { flex: 1; height: 4px; -webkit-appearance: none; appearance: none; background: rgba(255,255,255,0.18); border-radius: 2px; outline: none; }
   .${PFX}-progress-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--rp-accent, #7aa6ff); cursor: pointer; border: 1px solid #fff; }
   .${PFX}-progress-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--rp-accent, #7aa6ff); border: 1px solid #fff; cursor: pointer; }
+
   .${PFX}-ytlayer { display: none; transition: opacity .2s; flex-shrink: 0; }
   .${PFX}-ytlayer.show { display: block; position: relative; width: 100%; height: 130px; border-radius: 12px; overflow: hidden; background: #000; margin-bottom: 10px; }
   .${PFX}-ytlayer iframe { width: 100%; height: 130px; border: 0; display: block; }
@@ -1264,6 +2837,7 @@
   .${PFX}-ytclose { position: absolute; top: 5px; right: 5px; z-index: 3; width: 24px; height: 24px; border-radius: 50%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; cursor: pointer; }
   .${PFX}-yteye { position: absolute; top: 5px; right: 34px; z-index: 3; width: 24px; height: 24px; border-radius: 50%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; cursor: pointer; }
   .${PFX}-ytclose .${PFX}-ic, .${PFX}-yteye .${PFX}-ic { width: 13px; height: 13px; color: #fff; pointer-events: none; }
+
   .${PFX}-pill { display: flex; align-items: center; gap: 10px; padding: 10px 12px; min-width: 170px; max-width: 92vw; }
   .${PFX}-pill[data-handle] { cursor: grab; }
   .${PFX}-pill-icon, .${PFX}-pill-theme, .${PFX}-pill-vibe, .${PFX}-note-btn, .${PFX}-head-btn { width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.14); }
@@ -1273,6 +2847,7 @@
   .${PFX}-pill-controls { display: flex; align-items: center; gap: 8px; margin-left: auto; }
   .${PFX}-pill-theme { background: rgba(255,255,255,0.1); }
   .${PFX}-pill-vibe { background: var(--rp-accent, rgba(120,170,255,0.24)); }
+
   .${PFX}-panel { width: var(--rp-user-w, 264px); max-width: 92vw; flex: 1; min-height: 0; padding: 13px; display: flex; flex-direction: column; gap: 9px; overflow: hidden; }
   .${PFX}-scrollable { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; padding-right: 2px; min-height: 0; }
   .${PFX}-sec { border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
@@ -1280,9 +2855,11 @@
   .${PFX}-ymin-body { display: flex; align-items: center; gap: 8px; }
   .${PFX}-ymin-title { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: grab; }
   .${PFX}-ymin-controls, .${PFX}-ymin-actions { display: flex; align-items: center; gap: 8px; }
+
   .${PFX}-note-btn { width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.14); cursor: pointer; touch-action: none; }
   .${PFX}-note-btn:active { background: rgba(255,255,255,0.24); }
   .${PFX}-note-btn .${PFX}-ic { width: 16px; height: 16px; pointer-events: none; }
+
   .${PFX}-head { display: flex; align-items: center; gap: clamp(3px, calc((var(--rp-user-w, 264px) - 220px) * 0.06), 12px); flex-wrap: nowrap; flex-shrink: 0; }
   .${PFX}-head-grab { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; height: 30px; cursor: grab; touch-action: none; }
   .${PFX}-head-title { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
@@ -1291,14 +2868,17 @@
   .${PFX}-head-btn:active { opacity: 1; background: rgba(255,255,255,0.24); }
   .${PFX}-head-btn.on { opacity: 1; background: var(--rp-accent, rgba(120,170,255,0.3)); }
   .${PFX}-head-btn .${PFX}-ic { width: 14px; height: 14px; pointer-events: none; }
+
   .${PFX}-theme-btn { width: 26px; height: 26px; border-radius: 7px; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: .55; background: rgba(255,255,255,0.08); flex-shrink: 0; }
   .${PFX}-theme-btn:active { opacity: 1; }
   .${PFX}-theme-btn .${PFX}-ic { width: 14px; height: 14px; pointer-events: none; }
+
   .${PFX}-now { display: flex; flex-direction: column; gap: 1px; min-height: 24px; justify-content: center; text-align: center; padding: 0; flex-shrink: 0; }
   .${PFX}-now-title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .${PFX}-now-artist { font-size: 10px; opacity: .6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .${PFX}-now-status { font-size: 11px; opacity: .55; display: flex; align-items: center; justify-content: center; gap: 6px; }
   .${PFX}-now-pos { font-size: 10px; opacity: .4; margin-top: 1px; }
+
   .${PFX}-marq { overflow: hidden; white-space: nowrap; position: relative; }
   .${PFX}-marq-inner { display: inline-block; white-space: nowrap; will-change: transform; }
   .${PFX}-marq.run .${PFX}-marq-inner { animation: ${PFX}-marq-move var(--marq-dur, 6s) ease-in-out infinite alternate; }
@@ -1306,33 +2886,39 @@
     0% { transform: translateX(0); }
     100% { transform: translateX(var(--marq-shift, 0px)); }
   }
+
   .${PFX}-spin { width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.25); border-top-color: var(--rp-accent, #7aa6ff); border-radius: 50%; display: inline-block; animation: ${PFX}-rot .7s linear infinite; flex-shrink: 0; }
   @keyframes ${PFX}-rot { to { transform: rotate(360deg); } }
+
   .${PFX}-search { display: flex; gap: 6px; align-items: center; }
-  .${PFX}-search input { flex: 1; min-width: 0; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.12); border-radius: 9px; color: #f0f0f5; font-size: 13px; padding: 8px 10px; outline: none; font-family: inherit; }
+  .${PFX}-search input { flex: 1; min-width: 0; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.12); border-radius: 9px; color: var(--rp-text, #f0f0f5); font-size: 13px; padding: 8px 10px; outline: none; font-family: inherit; }
   .${PFX}-search input::placeholder { color: rgba(255,255,255,0.35); }
-  .${PFX}-search-btn { width: 38px; height: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.14); border: none; border-radius: 9px; color: #f0f0f5; cursor: pointer; }
+  .${PFX}-search-btn { width: 38px; height: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.14); border: none; border-radius: 9px; color: var(--rp-text, #f0f0f5); cursor: pointer; }
   .${PFX}-search-btn:active { background: rgba(255,255,255,0.26); }
   .${PFX}-search-btn .${PFX}-ic { width: 16px; height: 16px; pointer-events: none; }
+
   .${PFX}-controls { display: flex; align-items: center; justify-content: center; gap: 16px; flex-shrink: 0; }
-  .${PFX}-cbtn { background: rgba(255,255,255,0.1); border: none; cursor: pointer; color: #f0f0f5; display: flex; align-items:center; justify-content:center; padding: 8px; border-radius: 50%; }
+  .${PFX}-cbtn { background: rgba(255,255,255,0.1); border: none; cursor: pointer; color: var(--rp-text, #f0f0f5); display: flex; align-items:center; justify-content:center; padding: 8px; border-radius: 50%; }
   .${PFX}-cbtn:active { transform: scale(.86); background: rgba(255,255,255,0.24); }
   .${PFX}-cbtn .${PFX}-ic { width: 17px; height: 17px; pointer-events: none; }
   .${PFX}-cbtn.play { background: rgba(255,255,255,0.16); padding: 10px; }
   .${PFX}-cbtn.play .${PFX}-ic { width: 20px; height: 20px; }
   .${PFX}-cbtn-sm { padding: 6px; background: rgba(255,255,255,0.1); }
   .${PFX}-cbtn-sm .${PFX}-ic { width: 14px; height: 14px; }
+
   .${PFX}-ymin-ctrls { display: flex; align-items: center; justify-content: center; gap: 12px; }
   .${PFX}-vol { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .${PFX}-vol .${PFX}-ic { width: 15px; height: 15px; opacity: .55; flex-shrink: 0; }
-  .${PFX}-vol input { flex: 1; height: 4px; -webkit-appearance: none; appearance: none; background: rgba(255,255,255,0.18); border-radius: 2px; outline: none; }
+  .${PFX}-vol input { flex: 1; height:4px; -webkit-appearance: none; appearance: none; background: rgba(255,255,255,0.18); border-radius: 2px; outline: none; }
   .${PFX}-vol input::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: #fff; cursor: pointer; }
   .${PFX}-vol input::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%; background: #fff; border: none; cursor: pointer; }
+
   .${PFX}-sec-h { font-size: 10px; font-weight: 700; opacity: .5; text-transform: uppercase; letter-spacing: .04em; margin: 4px 0 2px; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
   .${PFX}-sec-h-actions { display: flex; gap: 4px; }
   .${PFX}-sec-h-btn { opacity: .6; cursor: pointer; display: flex; padding: 2px; }
   .${PFX}-sec-h-btn:active { opacity: 1; }
   .${PFX}-sec-h-btn .${PFX}-ic { width: 14px; height: 14px; pointer-events: none; }
+
   .${PFX}-empty { font-size: 11px; opacity: .4; text-align: center; padding: 6px 0; }
   .${PFX}-row { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; cursor: pointer; background: rgba(255,255,255,0.03); }
   .${PFX}-row:active { background: rgba(255,255,255,0.1); }
@@ -1353,14 +2939,17 @@
   .${PFX}-rfav { opacity: .5; cursor: pointer; display: flex; flex-shrink: 0; padding: 3px; }
   .${PFX}-rfav:active { opacity: 1; }
   .${PFX}-rfav .${PFX}-ic { width: 14px; height: 14px; pointer-events: none; }
+
   .${PFX}-more { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 8px; border-radius: 8px; background: rgba(255,255,255,0.03); cursor: pointer; font-size: 11px; opacity: .65; }
   .${PFX}-more:active { background: rgba(255,255,255,0.1); opacity: 1; }
   .${PFX}-more .${PFX}-ic { width: 13px; height: 13px; opacity: .6; }
   .${PFX}-more .${PFX}-spin { width: 12px; height: 12px; }
+
   .${PFX}-savebar { display: flex; gap: 6px; margin-top: 4px; }
   .${PFX}-savebtn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 10px; font-weight: 600; padding: 8px 4px; border-radius: 8px; background: rgba(255,255,255,0.1); cursor: pointer; }
   .${PFX}-savebtn:active { background: rgba(255,255,255,0.22); }
   .${PFX}-savebtn .${PFX}-ic { width: 13px; height: 13px; pointer-events: none; }
+
   .${PFX}-pop { position: absolute; left: 8px; right: 8px; z-index: 5; background: rgba(20,20,30,0.98); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.6); padding: 10px; display: flex; flex-direction: column; gap: 5px; max-height: 260px; overflow-y: auto; }
   .${PFX}-pop-h { font-size: 11px; font-weight: 700; opacity: .7; display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
   .${PFX}-pop-h .${PFX}-row-act { opacity: .6; }
@@ -1369,15 +2958,18 @@
   .${PFX}-pop-item.flash { border-color: #3ad97f; box-shadow: 0 0 6px rgba(58,217,127,0.5); }
   .${PFX}-pop-item .${PFX}-ic { width: 14px; height: 14px; flex-shrink: 0; pointer-events: none; }
   .${PFX}-pop-new { background: var(--rp-accent, rgba(120,170,255,0.25)); font-weight: 600; }
+
   .${PFX}-drawer { border-top: 1px solid rgba(255,255,255,0.1); padding-top: 9px; display: flex; flex-direction: column; gap: 7px; }
   .${PFX}-srcrow { display: flex; flex-wrap: wrap; gap: 6px; }
   .${PFX}-srcbtn { flex: 1 1 28%; text-align: center; font-size: 10px; font-weight: 600; padding: 7px 4px; border-radius: 8px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
   .${PFX}-srcbtn.on { background: var(--rp-accent, rgba(120,170,255,0.28)); border-color: var(--rp-accent, rgba(120,170,255,0.5)); }
+
   .${PFX}-keybox { display: flex; flex-direction: column; gap: 5px; padding: 8px; border-radius: 8px; background: rgba(0,0,0,0.18); }
   .${PFX}-flabel { font-size: 10px; opacity: .6; text-transform: uppercase; letter-spacing: .03em; margin-top: 2px; }
-  .${PFX}-finput { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #f0f0f5; font-size: 12px; padding: 7px 9px; outline: none; font-family: inherit; width: 100%; }
+  .${PFX}-finput { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: var(--rp-text, #f0f0f5); font-size: 12px; padding: 7px 9px; outline: none; font-family: inherit; width: 100%; }
   .${PFX}-flink { font-size: 10px; color: #6cf; text-decoration: none; opacity: .8; cursor: pointer; }
   .${PFX}-ythint { font-size: 10px; opacity: .45; text-align: center; }
+
   .${PFX}-tabs { display: flex; gap: 6px; }
   .${PFX}-tab { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; padding: 7px 4px; border-radius: 8px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
   .${PFX}-tab.on { background: var(--rp-accent, rgba(120,170,255,0.28)); border-color: var(--rp-accent, rgba(120,170,255,0.5)); }
@@ -1386,6 +2978,7 @@
   .${PFX}-chip { font-size: 10px; padding: 5px 9px; border-radius: 12px; background: rgba(255,255,255,0.1); cursor: pointer; }
   .${PFX}-chip:active { background: rgba(255,255,255,0.24); }
   .${PFX}-chip.on { background: var(--rp-accent, rgba(120,170,255,0.32)); }
+
   .${PFX}-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,0.05); cursor: pointer; }
   .${PFX}-toggle-label { font-size: 12px; font-weight: 600; }
   .${PFX}-toggle-sub { font-size: 9px; opacity: .5; margin-top: 1px; }
@@ -1393,15 +2986,17 @@
   .${PFX}-sw-track.on { background: var(--rp-accent, rgba(120,170,255,0.7)); }
   .${PFX}-sw-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .2s; }
   .${PFX}-sw-track.on .${PFX}-sw-knob { left: 18px; }
+
   .${PFX}-numrow { display: flex; gap: 8px; }
   .${PFX}-numbox { flex: 1; display: flex; flex-direction: column; gap: 3px; }
-  .${PFX}-numbox input { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #f0f0f5; font-size: 13px; padding: 7px; outline: none; text-align: center; font-family: inherit; width: 100%; }
+  .${PFX}-numbox input { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: var(--rp-text, #f0f0f5); font-size: 13px; padding: 7px; outline: none; text-align: center; font-family: inherit; width: 100%; }
   .${PFX}-profsel { display: flex; align-items: center; justify-content: space-between; gap: 6px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: 12px; }
   .${PFX}-profsel .${PFX}-ic { width: 13px; height: 13px; opacity: .6; }
   .${PFX}-quickbtn { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 9px; border-radius: 8px; background: var(--rp-accent, rgba(120,170,255,0.22)); cursor: pointer; font-size: 12px; font-weight: 600; }
   .${PFX}-quickbtn:active { opacity: .8; }
   .${PFX}-quickbtn .${PFX}-ic { width: 15px; height: 15px; }
-  .${PFX}-colorpop { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 10px; background: rgba(0,0,0,0.28); margin-top: 4px; }
+
+  .${PFX}-colorpop { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 10px; background: rgba(0,0,0,0.28); margin-top: 4px; max-height: min(58vh, 420px); overflow-y: auto; min-height: 0; flex-shrink: 1; }
   .${PFX}-colorpop-h { font-size: 10px; font-weight: 700; opacity: .6; text-transform: uppercase; letter-spacing: .04em; }
   .${PFX}-colorrow { display: flex; gap: 6px; align-items: center; }
   .${PFX}-colorrow input[type="color"] { width: 34px; height: 34px; padding: 0; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: transparent; cursor: pointer; flex-shrink: 0; }
@@ -1416,49 +3011,38 @@
   .${PFX}-colorbtns { display: flex; gap: 6px; }
   .${PFX}-cbtn2 { flex: 1; font-size: 11px; font-weight: 600; padding: 7px 4px; border-radius: 8px; background: rgba(255,255,255,0.1); cursor: pointer; text-align: center; }
   .${PFX}-cbtn2:active { background: rgba(255,255,255,0.24); }
+  .${PFX}-solidtoggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px; border-radius: 8px; background: rgba(255,255,255,0.05); cursor: pointer; }
+  .${PFX}-solidtoggle-lbl { font-size: 11px; font-weight: 600; }
 
-  .${PFX}-resize, .${PFX}-resize-left {
-    position: absolute;
-    width: 22px;
-    height: 22px;
-    z-index: 10;
-    opacity: 0;
-    cursor: nwse-resize;
-    touch-action: none;
-  }
-  .${PFX}-resize:hover, .${PFX}-resize-left:hover,
-  .${PFX}-root.resizing .${PFX}-resize,
-  .${PFX}-root.resizing .${PFX}-resize-left {
-    opacity: 0.6;
-  }
-  .${PFX}-resize {
-    right: 2px;
-    bottom: 2px;
-  }
-  .${PFX}-resize-left {
-    left: 2px;
-    bottom: 2px;
-    cursor: nesw-resize;
-  }
+  .${PFX}-resize, .${PFX}-resize-left { position: absolute; width: 22px; height: 22px; z-index: 10; opacity: 0; cursor: nwse-resize; touch-action: none; }
+  .${PFX}-resize:hover, .${PFX}-resize-left:hover, .${PFX}-root.resizing .${PFX}-resize, .${PFX}-root.resizing .${PFX}-resize-left { opacity: 0.6; }
+  .${PFX}-resize { right: 2px; bottom: 2px; }
+  .${PFX}-resize-left { left: 2px; bottom: 2px; cursor: nesw-resize; }
 
-  .${PFX}-root[data-theme="neon"] .${PFX}-glass {
-    background: rgba(10,10,18,var(--rp-bg-alpha, 1));
-    border: 1px solid var(--rp-accent, #ff2fd0);
-    box-shadow: 0 0 8px var(--rp-accent, rgba(255,47,208,0.4)), 0 0 18px var(--rp-accent, rgba(255,47,208,0.15));
-  }
-
+  .${PFX}-root[data-theme="neon"] .${PFX}-glass { background: rgba(10,10,18,var(--rp-bg-alpha, 1)); border: 1px solid var(--rp-accent, #ff2fd0); box-shadow: 0 0 8px var(--rp-accent, rgba(255,47,208,0.4)), 0 0 18px var(--rp-accent, rgba(255,47,208,0.15)); }
   .${PFX}-root[data-theme="glass"] .${PFX}-glass { background: rgba(255,255,255,var(--rp-bg-alpha, 0.08)); backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%); border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 12px 40px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.18); }
   .${PFX}-root[data-theme="neon"] .${PFX}-head-btn, .${PFX}-root[data-theme="neon"] .${PFX}-cbtn, .${PFX}-root[data-theme="neon"] .${PFX}-note-btn, .${PFX}-root[data-theme="neon"] .${PFX}-theme-btn, .${PFX}-root[data-theme="neon"] .${PFX}-pill-theme, .${PFX}-root[data-theme="neon"] .${PFX}-pill-icon { box-shadow: 0 0 6px var(--rp-accent, rgba(255,47,208,0.6)); }
   .${PFX}-root[data-theme="neon"] .${PFX}-ic { filter: drop-shadow(0 0 2px var(--rp-accent, rgba(255,47,208,0.7))); }
-  .${PFX}-root[data-theme="paper"] .${PFX}-glass { background: rgba(244,236,216,var(--rp-bg-alpha, 1)); border: 1px solid #c9b48a; box-shadow: 0 4px 14px rgba(80,60,30,0.25); color: #3a2f1c; }
-  .${PFX}-root[data-theme="paper"] { color: #3a2f1c; }
+  .${PFX}-root[data-theme="paper"] .${PFX}-glass { background: rgba(244,236,216,var(--rp-bg-alpha, 1)); border: 1px solid #c9b48a; box-shadow: 0 4px 14px rgba(80,60,30,0.25); color: var(--rp-text, #3a2f1c); }
+  .${PFX}-root[data-theme="paper"] { color: var(--rp-text, #3a2f1c); }
   .${PFX}-root[data-theme="paper"] .${PFX}-note-btn, .${PFX}-root[data-theme="paper"] .${PFX}-head-btn, .${PFX}-root[data-theme="paper"] .${PFX}-cbtn, .${PFX}-root[data-theme="paper"] .${PFX}-theme-btn, .${PFX}-root[data-theme="paper"] .${PFX}-pill-icon, .${PFX}-root[data-theme="paper"] .${PFX}-pill-theme, .${PFX}-root[data-theme="paper"] .${PFX}-srcbtn, .${PFX}-root[data-theme="paper"] .${PFX}-savebtn, .${PFX}-root[data-theme="paper"] .${PFX}-row, .${PFX}-root[data-theme="paper"] .${PFX}-tab, .${PFX}-root[data-theme="paper"] .${PFX}-chip, .${PFX}-root[data-theme="paper"] .${PFX}-toggle { background: rgba(120,90,40,0.1); }
-  .${PFX}-root[data-theme="paper"] .${PFX}-search input, .${PFX}-root[data-theme="paper"] .${PFX}-finput, .${PFX}-root[data-theme="paper"] .${PFX}-numbox input, .${PFX}-root[data-theme="paper"] .${PFX}-profsel { background: rgba(120,90,40,0.08); color: #3a2f1c; border-color: rgba(120,90,40,0.25); }
-  .${PFX}-root[data-theme="paper"] .${PFX}-pop { background: #f4ecd8; color: #3a2f1c; border-color: #c9b48a; }
+  .${PFX}-root[data-theme="paper"] .${PFX}-search input, .${PFX}-root[data-theme="paper"] .${PFX}-finput, .${PFX}-root[data-theme="paper"] .${PFX}-numbox input, .${PFX}-root[data-theme="paper"] .${PFX}-profsel { background: rgba(120,90,40,0.08); color: var(--rp-text, #3a2f1c); border-color: rgba(120,90,40,0.25); }
+  .${PFX}-root[data-theme="paper"] .${PFX}-pop { background: #f4ecd8; color: var(--rp-text, #3a2f1c); border-color: #c9b48a; }
   .${PFX}-root[data-theme="paper"] .${PFX}-pop-item { background: rgba(120,90,40,0.1); }
-  .${PFX}-root[data-theme="minimal"] .${PFX}-glass { background: color-mix(in srgb, var(--SmartThemeBodyColor, #888) calc(var(--rp-bg-alpha, 0.06) * 100%), transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #888) 16%, transparent); box-shadow: none; color: var(--SmartThemeBodyColor, #eee); }
-  .${PFX}-root[data-theme="minimal"] { color: var(--SmartThemeBodyColor, #eee); }
+  .${PFX}-root[data-theme="minimal"] .${PFX}-glass { background: color-mix(in srgb, var(--SmartThemeBodyColor, #888) calc(var(--rp-bg-alpha, 0.06) * 100%), transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, #888) 16%, transparent); box-shadow: none; color: var(--rp-text, var(--SmartThemeBodyColor, #eee)); }
+  .${PFX}-root[data-theme="minimal"] { color: var(--rp-text, var(--SmartThemeBodyColor, #eee)); }
   .${PFX}-root[data-theme="minimal"] .${PFX}-note-btn, .${PFX}-root[data-theme="minimal"] .${PFX}-head-btn, .${PFX}-root[data-theme="minimal"] .${PFX}-cbtn, .${PFX}-root[data-theme="minimal"] .${PFX}-theme-btn, .${PFX}-root[data-theme="minimal"] .${PFX}-pill-icon, .${PFX}-root[data-theme="minimal"] .${PFX}-pill-theme, .${PFX}-root[data-theme="minimal"] .${PFX}-row, .${PFX}-root[data-theme="minimal"] .${PFX}-srcbtn, .${PFX}-root[data-theme="minimal"] .${PFX}-savebtn, .${PFX}-root[data-theme="minimal"] .${PFX}-tab, .${PFX}-root[data-theme="minimal"] .${PFX}-chip, .${PFX}-root[data-theme="minimal"] .${PFX}-toggle { background: color-mix(in srgb, var(--SmartThemeBodyColor, #888) 8%, transparent); }
+
+  .${PFX}-root.${PFX}-solid .${PFX}-row, .${PFX}-root.${PFX}-solid .${PFX}-srcbtn, .${PFX}-root.${PFX}-solid .${PFX}-savebtn, .${PFX}-root.${PFX}-solid .${PFX}-tab, .${PFX}-root.${PFX}-solid .${PFX}-chip, .${PFX}-root.${PFX}-solid .${PFX}-toggle, .${PFX}-root.${PFX}-solid .${PFX}-cbtn2, .${PFX}-root.${PFX}-solid .${PFX}-more, .${PFX}-root.${PFX}-solid .${PFX}-pop-item { background: rgba(0,0,0,0.45) !important; }
+  .${PFX}-root.${PFX}-solid .${PFX}-head-btn, .${PFX}-root.${PFX}-solid .${PFX}-cbtn, .${PFX}-root.${PFX}-solid .${PFX}-note-btn, .${PFX}-root.${PFX}-solid .${PFX}-theme-btn, .${PFX}-root.${PFX}-solid .${PFX}-pill-icon, .${PFX}-root.${PFX}-solid .${PFX}-pill-theme, .${PFX}-root.${PFX}-solid .${PFX}-search-btn { background: rgba(0,0,0,0.5) !important; }
+  .${PFX}-root.${PFX}-solid .${PFX}-search input, .${PFX}-root.${PFX}-solid .${PFX}-finput, .${PFX}-root.${PFX}-solid .${PFX}-numbox input, .${PFX}-root.${PFX}-solid .${PFX}-profsel, .${PFX}-root.${PFX}-solid .${PFX}-keybox { background: rgba(0,0,0,0.55) !important; }
+  .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-row, .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-srcbtn, .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-savebtn, .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-tab, .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-chip, .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-toggle, .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-cbtn2, .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-more { background: rgba(120,90,40,0.32) !important; }
+  .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-head-btn, .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-cbtn, .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-note-btn, .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-theme-btn, .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-pill-icon, .${PFX}-root.${PFX}-solid[data-theme="paper"] .${PFX}-pill-theme { background: rgba(120,90,40,0.4) !important; }
+
+  .${PFX}-root.${PFX}-solid-light .${PFX}-row, .${PFX}-root.${PFX}-solid-light .${PFX}-srcbtn, .${PFX}-root.${PFX}-solid-light .${PFX}-savebtn, .${PFX}-root.${PFX}-solid-light .${PFX}-tab, .${PFX}-root.${PFX}-solid-light .${PFX}-chip, .${PFX}-root.${PFX}-solid-light .${PFX}-toggle, .${PFX}-root.${PFX}-solid-light .${PFX}-cbtn2, .${PFX}-root.${PFX}-solid-light .${PFX}-more, .${PFX}-root.${PFX}-solid-light .${PFX}-pop-item { background: rgba(255,255,255,0.5) !important; }
+  .${PFX}-root.${PFX}-solid-light .${PFX}-head-btn, .${PFX}-root.${PFX}-solid-light .${PFX}-cbtn, .${PFX}-root.${PFX}-solid-light .${PFX}-note-btn, .${PFX}-root.${PFX}-solid-light .${PFX}-theme-btn, .${PFX}-root.${PFX}-solid-light .${PFX}-pill-icon, .${PFX}-root.${PFX}-solid-light .${PFX}-pill-theme, .${PFX}-root.${PFX}-solid-light .${PFX}-search-btn { background: rgba(255,255,255,0.55) !important; }
+  .${PFX}-root.${PFX}-solid-light .${PFX}-search input, .${PFX}-root.${PFX}-solid-light .${PFX}-finput, .${PFX}-root.${PFX}-solid-light .${PFX}-numbox input, .${PFX}-root.${PFX}-solid-light .${PFX}-profsel, .${PFX}-root.${PFX}-solid-light .${PFX}-keybox { background: rgba(255,255,255,0.6) !important; }
+
   .${PFX}-bgrow { display: flex; gap: 8px; align-items: center; }
   .${PFX}-bgfile-label { flex: 1; display: inline-block; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 7px 9px; font-size: 11px; cursor: pointer; text-align: center; color: #ccc; }
   .${PFX}-bgfile-input { display: none; }
@@ -1473,35 +3057,66 @@
   let profPop = false;
 
   const SWATCHES = ['#ff2fd0', '#7aa6ff', '#00e0c6', '#ffb02e', '#ff5c5c', '#a06bff', '#3ad97f', '#ff8fb3'];
+  const TEXT_SWATCHES = ['#ffffff', '#000000', '#f0f0f5', '#3a2f1c', '#cccccc', '#ffe9a8', '#a8e0ff', '#ffb3c6'];
 
   function cleanupAll() {
     const sid = scriptId();
-    try { if ($j && sid) { $j('body > div[script_id="' + sid + '"]').remove(); $j('head > div[script_id="' + sid + '"]').remove(); } } catch (_) {}
     try {
-      document.querySelectorAll('[class*="' + PFX + '"], .lg-widget').forEach(function (el) { el.remove(); });
-      document.querySelectorAll('style').forEach(function (st) { if (st.id === PFX + '-css' || (st.textContent && st.textContent.indexOf(PFX) !== -1)) st.remove(); });
+      if ($j && sid) {
+        $j('body > div[script_id="' + sid + '"]').remove();
+        $j('head > div[script_id="' + sid + '"]').remove();
+      }
     } catch (_) {}
-    try { if ($j) $j(window).off('.' + PFX); } catch (_) {}
+    try {
+      document.querySelectorAll('[class*="' + PFX + '"], .lg-widget').forEach(function (el) {
+        el.remove();
+      });
+      document.querySelectorAll('style').forEach(function (st) {
+        if (st.id === PFX + '-css' || (st.textContent && st.textContent.indexOf(PFX) !== -1)) st.remove();
+      });
+    } catch (_) {}
+    try {
+      if ($j) $j(window).off('.' + PFX);
+    } catch (_) {}
   }
+
   function getMount() {
     const sid = scriptId();
-    if ($j && sid) { const host = $j('<div>').attr('script_id', sid); $j('body').append(host); return host[0]; }
+    if ($j && sid) {
+      const host = $j('<div>').attr('script_id', sid);
+      $j('body').append(host);
+      return host[0];
+    }
     return document.body;
   }
+
   function injectStyles() {
-    const st = document.createElement('style'); st.id = PFX + '-css'; st.textContent = CSS;
+    const st = document.createElement('style');
+    st.id = PFX + '-css';
+    st.textContent = CSS;
     const sid = scriptId();
-    if ($j && sid) { const wrap = $j('<div>').attr('script_id', sid).append(st); $j('head').append(wrap); }
-    else { (document.head || document.documentElement).appendChild(st); }
+    if ($j && sid) {
+      const wrap = $j('<div>').attr('script_id', sid).append(st);
+      $j('head').append(wrap);
+    } else {
+      (document.head || document.documentElement).appendChild(st);
+    }
   }
-  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
 
   function placeholderText() {
     if (cfg.source === 'ytlink') return 'Ссылка YouTube (трек/плейлист)';
     return 'Имя (топ) или Имя — Трек';
   }
 
-  function syncYtLayer() {
+    function syncYtLayer() {
     if (!ytLayer) return;
     const t = curTrack();
     const yt = isYtTrack(t);
@@ -1517,11 +3132,13 @@
         f.setAttribute('referrerpolicy', 'origin');
         f.src = want;
         ytLayer.appendChild(f);
+
         const eye = document.createElement('div');
         eye.className = PFX + '-yteye';
         eye.setAttribute('data-yteye', '1');
         eye.innerHTML = ytHidden ? ICONS.eyeOff : ICONS.eye;
         ytLayer.appendChild(eye);
+
         const cls = document.createElement('div');
         cls.className = PFX + '-ytclose';
         cls.setAttribute('data-ytclose', '1');
@@ -1547,13 +3164,21 @@
     if (eye) eye.innerHTML = ytHidden ? ICONS.eyeOff : ICONS.eye;
   }
 
-  function closeYt() {
+   function closeYt() {
+    currentPlayId++;
     ytCurrentEmbed = null;
-    if (ytLayer) { ytLayer.innerHTML = ''; ytLayer.className = PFX + '-ytlayer'; }
+
+    if (ytLayer) {
+      ytLayer.innerHTML = '';
+      ytLayer.className = PFX + '-ytlayer';
+    }
+
     const t = curTrack();
-    if (isYtTrack(t)) { isPlaying = false; }
+    if (isYtTrack(t)) isPlaying = false;
+
     render();
   }
+
 
   function pillHTML() {
     const cur = curTrack();
@@ -1568,6 +3193,7 @@
     h += '</div></div>';
     return h;
   }
+
   function yminHTML() {
     const vibeBtn = rpEnabled() ? '<div class="' + PFX + '-pill-vibe" data-quickvibe>' + (rpBusy ? '<span class="' + PFX + '-spin"></span>' : ICONS.wand) + '</div>' : '';
     return '<div class="' + PFX + '-glass ' + PFX + '-ymin" data-handle>' +
@@ -1585,6 +3211,7 @@
       '</div>' +
     '</div>';
   }
+
   function resultsHTML() {
     let h = '<div class="' + PFX + '-sec-h"><span>' + esc(resultsTitle || 'Результаты') + ' (' + results.length + ')</span>' +
       '<span class="' + PFX + '-sec-h-actions">' +
@@ -1592,7 +3219,7 @@
         '<span class="' + PFX + '-sec-h-btn" data-resclear>' + ICONS.close + '</span>' +
       '</span></div>';
     if (resCollapsed) return h;
-    h += '<div class="' + PFX + '-sec" data-scrollsec>';
+    h += '<div class="' + PFX + '-sec" data-scrollsec="results">';
     results.forEach(function (t, i) {
       h += '<div class="' + PFX + '-row' + (t.why ? ' rprow' : '') + '" data-resplay="' + i + '">' +
         '<div class="' + PFX + '-row-meta"><div class="' + PFX + '-row-t">' + esc(t.title) + '</div><div class="' + PFX + '-row-a">' + esc(t.artist) + '</div></div>' +
@@ -1607,6 +3234,7 @@
     h += '</div>';
     return h;
   }
+
   function keyBoxHTML() {
     if (cfg.source === 'jamendo') {
       return '<div class="' + PFX + '-keybox">' +
@@ -1627,6 +3255,7 @@
     }
     return '';
   }
+
   function searchHTML() {
     let h = '<div class="' + PFX + '-drawer">';
     h += '<div class="' + PFX + '-tabs">' +
@@ -1637,15 +3266,19 @@
       '<input type="text" data-q placeholder="' + esc(placeholderText()) + '">' +
       (searching ? '<button class="' + PFX + '-search-btn" data-cancel-search title="Отменить поиск">' + ICONS.cancelX + '</button>' : '<button class="' + PFX + '-search-btn" data-find>' + ICONS.search + '</button>') +
     '</div>';
+    if (searching) {
+      h += '<div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; font-size: 11px; color: var(--rp-accent, #7aa6ff); opacity: 0.9;">' +
+        '<span class="' + PFX + '-spin" style="width: 14px; height: 14px; border-width: 2px;"></span>' +
+        '<span>' + (statusMsg ? esc(statusMsg) : 'Шуршу в интернетах...') + '</span>' +
+      '</div>';
+    }
     if (searchTab === 'src') {
       h += '<div class="' + PFX + '-flabel">Источник</div>' +
         '<div class="' + PFX + '-srcrow">' +
-          '<div class="' + PFX + '-srcbtn ' + (cfg.source === 'jamendo' ? 'on' : '') + '" data-src="jamendo">Jamendo</div>' +
           '<div class="' + PFX + '-srcbtn ' + (cfg.source === 'youtube' ? 'on' : '') + '" data-src="youtube">YouTube API</div>' +
+          '<div class="' + PFX + '-srcbtn ' + (cfg.source === 'jamendo' ? 'on' : '') + '" data-src="jamendo">Jamendo</div>' +
           '<div class="' + PFX + '-srcbtn ' + (cfg.source === 'ytlink' ? 'on' : '') + '" data-src="ytlink">YouTube</div>' +
           '<div class="' + PFX + '-srcbtn ' + (cfg.source === 'baibai' ? 'on' : '') + '" data-src="baibai">baibai</div>' +
-          '<div class="' + PFX + '-srcbtn ' + (cfg.source === 'ccmixter' ? 'on' : '') + '" data-src="ccmixter">ccMixter</div>' +
-          '<div class="' + PFX + '-srcbtn ' + (cfg.source === 'fma' ? 'on' : '') + '" data-src="fma">FMA</div>' +
         '</div>' +
         keyBoxHTML();
     }
@@ -1657,14 +3290,17 @@
     h += '</div>';
     return h;
   }
+
   function libHTML() {
-    let h = '<div class="' + PFX + '-sec" data-scrollsec>';
+    let h = '<div class="' + PFX + '-sec" data-scrollsec="lib">';
     if (editId !== null) {
       let pl = null;
       if (editKind === 'm') pl = lib.manual.find(function (x) { return x.id === editId; });
       else pl = lib.rp[editId];
-      if (!pl) { editId = null; editKind = null; }
-      else {
+      if (!pl) {
+        editId = null;
+        editKind = null;
+      } else {
         h += '<div class="' + PFX + '-sec-h">' + esc(pl.name) + ' · ред.</div>';
         if (!pl.tracks || !pl.tracks.length) h += '<div class="' + PFX + '-empty">Пусто</div>';
         else pl.tracks.forEach(function (t, i) {
@@ -1680,6 +3316,7 @@
         return h;
       }
     }
+
     h += '<div class="' + PFX + '-sec-h">Ручные плейлисты</div>';
     if (!lib.manual.length) h += '<div class="' + PFX + '-empty">Нет сохранённых</div>';
     else lib.manual.forEach(function (p) {
@@ -1690,6 +3327,7 @@
         '<span class="' + PFX + '-row-act" data-delm="' + p.id + '">' + ICONS.close + '</span>' +
       '</div>';
     });
+
     h += '<div class="' + PFX + '-sec-h">Плейлисты РП (по чатам)</div>';
     const keys = Object.keys(lib.rp);
     if (!keys.length) h += '<div class="' + PFX + '-empty">Нет сохранённых</div>';
@@ -1709,11 +3347,17 @@
   function queueHTML() {
     let h = '<div class="' + PFX + '-sec-h"><span>Очередь (' + queue.length + ')</span>' +
       '<span class="' + PFX + '-sec-h-actions">' +
+        (queue.length ? '<span class="' + PFX + '-sec-h-btn" data-clearqueue title="Очистить очередь">' + ICONS.close + '</span>' : '') +
         '<span class="' + PFX + '-sec-h-btn" data-queuetoggle>' + (queueCollapsed ? ICONS.chevron : ICONS.chevronUp) + '</span>' +
       '</span></div>';
+
     if (queueCollapsed) return h;
-    if (!queue.length) return h + '<div class="' + PFX + '-sec"><div class="' + PFX + '-empty">Очередь пуста</div></div>';
-    h += '<div class="' + PFX + '-sec" data-scrollsec>';
+
+    if (!queue.length) {
+      return h + '<div class="' + PFX + '-sec"><div class="' + PFX + '-empty">Очередь пуста</div></div>';
+    }
+
+    h += '<div class="' + PFX + '-sec" data-scrollsec="queue">';
     queue.forEach(function (t, i) {
       const act = (i === curIdx);
       h += '<div class="' + PFX + '-row' + (act ? ' active' : '') + '" data-pl="' + i + '">' +
@@ -1725,10 +3369,12 @@
         '<span class="' + PFX + '-row-act" data-pldel="' + i + '">' + ICONS.close + '</span>' +
       '</div>';
     });
+
     h += '</div><div class="' + PFX + '-savebar">' +
       '<div class="' + PFX + '-savebtn" data-savemanual>' + ICONS.save + '<span>В ручные</span></div>' +
       '<div class="' + PFX + '-savebtn" data-saverp>' + ICONS.save + '<span>В РП-чат</span></div>' +
     '</div>';
+
     return h;
   }
 
@@ -1749,27 +3395,35 @@
     }
 
     if (radioTab === 'soma') {
-      h += '<div class="' + PFX + '-sec" data-scrollsec>';
+      h += '<div class="' + PFX + '-sec" data-scrollsec="radio">';
       SOMA_STATIONS.forEach(function (s) { h += stationRow(s); });
+      h += '<div class="' + PFX + '-more" data-somamore>' +
+        (somaLoading ? '<span class="' + PFX + '-spin"></span>Загружаю…' : ICONS.search + (somaLoadedFromApi ? 'Обновить список SomaFM' : 'Загрузить ещё станции SomaFM')) +
+      '</div>';
       h += '</div>';
     } else if (radioTab === 'browser') {
       h += '<div class="' + PFX + '-search" style="margin-top:7px">' +
         '<input type="text" data-rq placeholder="Жанр, страна, язык...">' +
         '<button class="' + PFX + '-search-btn" data-rfind>' + ICONS.search + '</button>' +
-        '</div>';
+      '</div>';
       h += '<div class="' + PFX + '-chips">';
-      RADIO_CHIPS.forEach(function (c) { h += '<div class="' + PFX + '-chip" data-rchip="' + c + '">' + c + '</div>'; });
+      RADIO_CHIPS.forEach(function (c) {
+        h += '<div class="' + PFX + '-chip" data-rchip="' + c + '">' + c + '</div>';
+      });
       h += '</div>';
-      h += '<div class="' + PFX + '-sec" data-scrollsec>';
+      h += '<div class="' + PFX + '-sec" data-scrollsec="radio">';
       if (!radioResults.length) h += '<div class="' + PFX + '-empty">' + (statusMsg && statusMsg.indexOf('адио') >= 0 ? esc(statusMsg) : 'Введите запрос или тапните тег') + '</div>';
       else radioResults.forEach(function (s) { h += stationRow(s); });
       h += '</div>';
     } else {
-      h += '<div class="' + PFX + '-sec" data-scrollsec>';
+      h += '<div class="' + PFX + '-sec" data-scrollsec="radio">';
       if (!radioFav.length) h += '<div class="' + PFX + '-empty">Нет избранных станций</div>';
-      else radioFav.forEach(function (s) { h += stationRow(s, '<span class="' + PFX + '-row-act" data-rdelfav="' + esc(s.url) + '">' + ICONS.close + '</span>'); });
+      else radioFav.forEach(function (s) {
+        h += stationRow(s, '<span class="' + PFX + '-row-act" data-rdelfav="' + esc(s.url) + '">' + ICONS.close + '</span>');
+      });
       h += '</div>';
     }
+
     return h + '</div>';
   }
 
@@ -1784,6 +3438,7 @@
         '<div class="' + PFX + '-numbox"><div class="' + PFX + '-flabel">Треков</div><input type="number" min="1" max="10" data-rpnum="rpCount" value="' + (cfg.rpCount || 5) + '"></div>' +
       '</div>';
     }
+
     if (cfg.rpQuick) {
       h += '<div class="' + PFX + '-toggle" data-rptoggle="rpQuickAutoplay"><div><div class="' + PFX + '-toggle-label">Авто-играть (быстрый)</div><div class="' + PFX + '-toggle-sub">сразу включать найденный трек</div></div><div class="' + PFX + '-sw-track ' + (cfg.rpQuickAutoplay ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>';
       h += '<div class="' + PFX + '-quickbtn" data-quickvibe>' + (rpBusy ? '<span class="' + PFX + '-spin"></span>' : ICONS.wand) + 'Вайб сцены</div>';
@@ -1800,11 +3455,13 @@
     });
     h += '<div class="' + PFX + '-chip ' + (cfg.rpLang === 'custom' ? 'on' : '') + '" data-rplang="custom">+ свой</div>';
     h += '</div>';
+
     if (cfg.rpLang === 'custom') {
       h += '<input class="' + PFX + '-finput" data-cfg="rpLangCustom" placeholder="напр. Korean, Spanish..." value="' + esc(cfg.rpLangCustom) + '">';
     }
 
     h += '<div class="' + PFX + '-toggle" data-rptoggle="rpTokenLimitOn"><div><div class="' + PFX + '-toggle-label">Лимит контекста</div><div class="' + PFX + '-toggle-sub">ограничить объём сканирования</div></div><div class="' + PFX + '-sw-track ' + (cfg.rpTokenLimitOn ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>';
+
     if (cfg.rpTokenLimitOn) {
       h += '<div class="' + PFX + '-numbox"><div class="' + PFX + '-flabel">Лимит токенов (≈)</div><input type="number" min="1000" step="1000" data-rpnum="rpTokenLimit" value="' + (cfg.rpTokenLimit || 6000) + '"></div>';
     }
@@ -1815,6 +3472,7 @@
 
   function colorPopHTML() {
     const cur = accentColor() || '#7aa6ff';
+    const curTxt = currentTextColor() || '#ffffff';
     let opv;
     if (bgPending && typeof bgPending.opacity === 'number') opv = bgPending.opacity;
     else {
@@ -1822,32 +3480,81 @@
       if (b && typeof b.opacity === 'number') opv = b.opacity;
       else opv = (typeof cfg.opacity === 'number' && cfg.opacity >= 0) ? cfg.opacity : 92;
     }
+
     let sw = '';
-    SWATCHES.forEach(function (c) { sw += '<div class="' + PFX + '-sw" data-swatch="' + c + '" style="background:' + c + '"></div>'; });
-    return '<div class="' + PFX + '-colorpop">' +
+    SWATCHES.forEach(function (c) {
+      sw += '<div class="' + PFX + '-sw" data-swatch="' + c + '" style="background:' + c + '"></div>';
+    });
+
+    let tsw = '';
+    TEXT_SWATCHES.forEach(function (c) {
+      tsw += '<div class="' + PFX + '-sw" data-textswatch="' + c + '" style="background:' + c + '"></div>';
+    });
+
+    const solidOn = isSolidTheme();
+    const solidLightOn = isSolidLightTheme();
+
+    const curBg = currentBg();
+    const bgUrlVal = (bgPending && bgPending.url) || (curBg && curBg.url) || '';
+    const bgName = bgPending ? (bgPending.base64 ? 'Файл выбран' : (bgPending.url ? 'URL: ' + esc(bgPending.url) : '')) : (curBg && curBg.base64 ? 'Текущий файл темы' : (curBg && curBg.url ? 'URL: ' + esc(curBg.url) : ''));
+
+    return '<div class="' + PFX + '-colorpop" data-scrollsec="colorpop">' +
       '<div class="' + PFX + '-colorpop-h">Акцентный цвет</div>' +
       '<div class="' + PFX + '-colorrow">' +
         '<input type="color" data-colorpick value="' + cur + '">' +
         '<input class="' + PFX + '-finput" data-colorhex placeholder="#RRGGBB" value="' + esc(accentColor()) + '">' +
       '</div>' +
       '<div class="' + PFX + '-swatches">' + sw + '</div>' +
+      '<div class="' + PFX + '-colorbtns">' +
+        '<div class="' + PFX + '-cbtn2" data-accentapplytheme>Акцент: эта тема</div>' +
+        '<div class="' + PFX + '-cbtn2" data-accentapplyall>Акцент: все темы</div>' +
+        '<div class="' + PFX + '-cbtn2" data-accentdel>Сброс</div>' +
+      '</div>' +
+
+      '<div class="' + PFX + '-colorpop-h">Цвет текста</div>' +
+      '<div class="' + PFX + '-colorrow">' +
+        '<input type="color" data-textpick value="' + curTxt + '">' +
+        '<input class="' + PFX + '-finput" data-texthex placeholder="#RRGGBB" value="' + esc(currentTextColor()) + '">' +
+      '</div>' +
+      '<div class="' + PFX + '-swatches">' + tsw + '</div>' +
+      '<div class="' + PFX + '-colorbtns">' +
+        '<div class="' + PFX + '-cbtn2" data-textapplytheme>Текст: эта тема</div>' +
+        '<div class="' + PFX + '-cbtn2" data-textapplyall>Текст: все темы</div>' +
+        '<div class="' + PFX + '-cbtn2" data-textdel>Сброс текста</div>' +
+      '</div>' +
+
+      '<div class="' + PFX + '-colorpop-h">Подложки под текст</div>' +
+      '<div class="' + PFX + '-solidtoggle" data-solidtoggle><div class="' + PFX + '-solidtoggle-lbl">Тёмная подложка</div><div class="' + PFX + '-sw-track ' + (solidOn ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>' +
+      '<div class="' + PFX + '-solidtoggle" data-solidlighttoggle><div class="' + PFX + '-solidtoggle-lbl">Светлая подложка</div><div class="' + PFX + '-sw-track ' + (solidLightOn ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>' +
+      '<div class="' + PFX + '-colorbtns">' +
+        '<div class="' + PFX + '-cbtn2" data-soliddarkall>Тёмные: все</div>' +
+        '<div class="' + PFX + '-cbtn2" data-solidlightall>Светлые: все</div>' +
+        '<div class="' + PFX + '-cbtn2" data-solidnoneall>Снять со всех</div>' +
+      '</div>' +
+
       '<div class="' + PFX + '-colorpop-h">Прозрачность фона</div>' +
       '<div class="' + PFX + '-oprow">' + ICONS.palette + '<input type="range" min="0" max="100" value="' + opv + '" data-opacity><span class="' + PFX + '-opval">' + opv + '%</span></div>' +
+      '<div class="' + PFX + '-colorbtns">' +
+        '<div class="' + PFX + '-cbtn2" data-opapplytheme>Прозр: эта тема</div>' +
+        '<div class="' + PFX + '-cbtn2" data-opapplyall>Прозр: все темы</div>' +
+      '</div>' +
+
       '<div class="' + PFX + '-colorpop-h">Фон виджета</div>' +
       '<div class="' + PFX + '-bgrow">' +
-        '<input class="' + PFX + '-finput" placeholder="URL изображения" data-bg-url value="' + esc((bgPending && bgPending.url) || '') + '">' +
+        '<input class="' + PFX + '-finput" placeholder="URL изображения" data-bg-url value="' + esc(bgUrlVal) + '">' +
         '<label class="' + PFX + '-bgfile-label">Выбрать файл<input type="file" accept="image/*" data-bg-file class="' + PFX + '-bgfile-input"></label>' +
       '</div>' +
-      '<div class="' + PFX + '-bgfile-name" data-bgfile-name>' + (bgPending ? (bgPending.base64 ? 'Файл выбран' : (bgPending.url ? 'URL: ' + esc(bgPending.url) : '')) : '') + '</div>' +
+      '<div class="' + PFX + '-bgfile-name" data-bgfile-name>' + bgName + '</div>' +
       '<div class="' + PFX + '-colorbtns">' +
-        '<div class="' + PFX + '-cbtn2" data-bgapplytheme>Применить к этой теме</div>' +
-        '<div class="' + PFX + '-cbtn2" data-bgapplyall>Применить ко всем</div>' +
+        '<div class="' + PFX + '-cbtn2" data-bgapplytheme>Фон: эта тема</div>' +
+        '<div class="' + PFX + '-cbtn2" data-bgapplyall>Фон: все темы</div>' +
       '</div>' +
       '<div class="' + PFX + '-colorbtns">' +
         '<div class="' + PFX + '-cbtn2" data-bgdeltheme>Удалить фон (тема)</div>' +
         '<div class="' + PFX + '-cbtn2" data-bgdelall>Удалить фон (все)</div>' +
       '</div>' +
-      '<div class="' + PFX + '-colorbtns">' +
+
+            '<div class="' + PFX + '-colorbtns">' +
         '<div class="' + PFX + '-cbtn2" data-sizereset>Размер сброс</div>' +
         '<div class="' + PFX + '-cbtn2" data-colorreset>Сброс</div>' +
         '<div class="' + PFX + '-cbtn2" data-colorclose>Готово</div>' +
@@ -1859,10 +3566,12 @@
     let h = '<div class="' + PFX + '-pop" data-plpop>';
     h += '<div class="' + PFX + '-pop-h"><span>В плейлист</span><span class="' + PFX + '-row-act" data-plpopclose>' + ICONS.close + '</span></div>';
     h += '<div class="' + PFX + '-pop-item ' + PFX + '-pop-new" data-plnew>' + ICONS.plus + '<span>Создать новый</span></div>';
-    if (lib.manual.length) lib.manual.forEach(function (p) {
-      const fl = (flashPlId === p.id) ? ' flash' : '';
-      h += '<div class="' + PFX + '-pop-item' + fl + '" data-pladd="' + p.id + '">' + ICONS.folder + '<span>' + esc(p.name) + '</span><span class="' + PFX + '-row-src" style="margin-left:auto">' + (p.tracks ? p.tracks.length : 0) + '</span></div>';
-    });
+    if (lib.manual.length) {
+      lib.manual.forEach(function (p) {
+        const fl = (flashPlId === p.id) ? ' flash' : '';
+        h += '<div class="' + PFX + '-pop-item' + fl + '" data-pladd="' + p.id + '">' + ICONS.folder + '<span>' + esc(p.name) + '</span><span class="' + PFX + '-row-src" style="margin-left:auto">' + (p.tracks ? p.tracks.length : 0) + '</span></div>';
+      });
+    }
     h += '</div>';
     return h;
   }
@@ -1873,9 +3582,11 @@
     h += '<div class="' + PFX + '-pop-item' + (!cfg.rpProfile ? ' ' + PFX + '-pop-new' : '') + '" data-profpick="">' + ICONS.gear + '<span>Текущий профиль Таверны</span></div>';
     const profs = getProfiles();
     if (!profs.length) h += '<div class="' + PFX + '-empty">Нет сохранённых профилей</div>';
-    else profs.forEach(function (p) {
-      h += '<div class="' + PFX + '-pop-item' + (cfg.rpProfile === p.id ? ' ' + PFX + '-pop-new' : '') + '" data-profpick="' + esc(p.id) + '">' + ICONS.wand + '<span>' + esc(p.name || p.id) + '</span></div>';
-    });
+    else {
+      profs.forEach(function (p) {
+        h += '<div class="' + PFX + '-pop-item' + (cfg.rpProfile === p.id ? ' ' + PFX + '-pop-new' : '') + '" data-profpick="' + esc(p.id) + '">' + ICONS.wand + '<span>' + esc(p.name || p.id) + '</span></div>';
+      });
+    }
     h += '</div>';
     return h;
   }
@@ -1886,6 +3597,7 @@
     const yt = isYtTrack(cur);
     const radioNow = (!cur && window.__rpRadioNow);
     let nowBlock;
+
     if (yt) {
       nowBlock = '<div class="' + PFX + '-now"><div class="' + PFX + '-now-title ' + PFX + '-marq"><span class="' + PFX + '-marq-inner">' + esc(cur.title) + '</span></div><div class="' + PFX + '-now-pos">' + (curIdx + 1) + ' / ' + queue.length + '</div></div>';
     } else if (radioNow) {
@@ -1897,7 +3609,7 @@
     }
 
     let progressBlock = '';
-    if (cur && !yt && !radioNow) {
+    if (cur && !radioNow && (!yt || (yt && !ytCurrentEmbed))) {
       progressBlock = '<div class="' + PFX + '-progress-container">' +
         '<span class="' + PFX + '-time-lbl ' + PFX + '-cur-time">' + formatTime(audioCurrentTime) + '</span>' +
         '<input type="range" class="' + PFX + '-progress-slider" min="0" step="0.1" max="' + (audioDuration || 100) + '" value="' + audioCurrentTime + '" data-progress-seek>' +
@@ -1923,11 +3635,11 @@
       '<div class="' + PFX + '-vol">' + ICONS.vol + '<input type="range" min="0" max="100" value="' + vol + '" data-vol></div>' +
       '<div class="' + PFX + '-controls">' +
         '<button class="' + PFX + '-cbtn" data-prev>' + ICONS.prev + '</button>' +
-        (yt ? '' : '<button class="' + PFX + '-cbtn play" data-play>' + (isPlaying ? ICONS.pause : ICONS.play) + '</button>') +
+        ((yt && ytCurrentEmbed) ? '' : '<button class="' + PFX + '-cbtn play" data-play>' + (isPlaying ? ICONS.pause : ICONS.play) + '</button>') +
         '<button class="' + PFX + '-cbtn" data-next>' + ICONS.next + '</button>' +
       '</div>' +
       progressBlock +
-      (yt ? '<div class="' + PFX + '-ythint">Управление плеем — в окошке YouTube</div>' : '') +
+      ((yt && ytCurrentEmbed) ? '<div class="' + PFX + '-ythint">Управление плеем — в окошке YouTube</div>' : '') +
       '<div class="' + PFX + '-scrollable">' +
         (searchOpen ? searchHTML() : '') +
         (radioOpen ? radioHTML() : '') +
@@ -1976,21 +3688,46 @@
     } else {
       root.style.removeProperty('--rp-user-w');
     }
-
     const topOffset = TOPBAR + 10;
     const maxPossible = Math.max(200, H - topOffset - 10);
-
     let maxH;
-    if (userH > 0) {
-      maxH = Math.max(180, Math.min(userH, maxPossible));
-    } else {
-      maxH = Math.max(200, Math.min(maxPossible, Math.floor(H * 0.7)));
-    }
+    if (userH > 0) maxH = Math.max(180, Math.min(userH, maxPossible));
+    else maxH = Math.max(200, Math.min(maxPossible, Math.floor(H * 0.7)));
     root.style.maxHeight = maxH + 'px';
     root.style.removeProperty('height');
     root.style.minHeight = '180px';
-
     root.style.removeProperty('--rp-sec-max');
+  }
+
+  let scrollMemory = {};
+  let renderedScrollKey = 'main';
+
+  function currentScrollKey() {
+    if (colorPopOpen) return 'color';
+    if (searchOpen) return 'search';
+    if (radioOpen) return 'radio';
+    if (rpOpen) return 'rp';
+    if (libOpen) return editId !== null ? 'lib-edit' : 'lib';
+    if (plOpen) return 'queue';
+    return 'main';
+  }
+
+  function saveScrollState(key) {
+    if (!bodyEl) return;
+    key = key || renderedScrollKey || currentScrollKey();
+    const sc = bodyEl.querySelector('.' + PFX + '-scrollable');
+    if (sc) scrollMemory['scrollable:' + key] = sc.scrollTop;
+    const cp = bodyEl.querySelector('.' + PFX + '-colorpop');
+    if (cp) scrollMemory.colorpop = cp.scrollTop;
+  }
+
+  function restoreScrollState(key) {
+    if (!bodyEl) return;
+    key = key || currentScrollKey();
+    const sc = bodyEl.querySelector('.' + PFX + '-scrollable');
+    if (sc) sc.scrollTop = scrollMemory['scrollable:' + key] || 0;
+    const cp = bodyEl.querySelector('.' + PFX + '-colorpop');
+    if (cp) cp.scrollTop = scrollMemory.colorpop || 0;
   }
 
   function render() {
@@ -2004,15 +3741,18 @@
     const keepCfg = active && active.hasAttribute && active.hasAttribute('data-cfg') ? { k: active.getAttribute('data-cfg'), v: active.value } : null;
     const keepNum = active && active.hasAttribute && active.hasAttribute('data-rpnum') ? { k: active.getAttribute('data-rpnum'), v: active.value } : null;
     const keepHex = active && active.hasAttribute && active.hasAttribute('data-colorhex') ? active.value : null;
+    const keepTHex = active && active.hasAttribute && active.hasAttribute('data-texthex') ? active.value : null;
 
-    const prevSec = bodyEl && bodyEl.querySelector('[data-scrollsec]');
-    if (prevSec) secScroll = prevSec.scrollTop;
+    saveScrollState(renderedScrollKey);
 
     const cur = curTrack();
-    const ytNow = isYtTrack(cur);
+    const ytNow = isYtTrack(cur) && ytCurrentEmbed;
     root.setAttribute('data-theme', theme);
     applyAccentVar();
-    if (rpPulse) root.classList.add(PFX + '-pulse'); else root.classList.remove(PFX + '-pulse');
+    applyTextColorVar();
+    applySolidClass();
+    if (rpPulse) root.classList.add(PFX + '-pulse');
+    else root.classList.remove(PFX + '-pulse');
 
     let html;
     if (collapsed) html = (ytNow ? yminHTML() : pillHTML());
@@ -2022,32 +3762,80 @@
     applyUserSize();
     applyPos();
 
-    const newSec = bodyEl.querySelector('[data-scrollsec]');
-    if (newSec && secScroll) newSec.scrollTop = secScroll;
+    const nextKey = currentScrollKey();
+    renderedScrollKey = nextKey;
 
-    if (keepQ !== null) { const i = bodyEl.querySelector('[data-q]'); if (i) { i.value = keepQ; i.focus(); } }
-    if (keepRq !== null) { const i = bodyEl.querySelector('[data-rq]'); if (i) { i.value = keepRq; i.focus(); } }
-    if (keepCfg) { const i = bodyEl.querySelector('[data-cfg="' + keepCfg.k + '"]'); if (i) { i.value = keepCfg.v; i.focus(); } }
-    if (keepNum) { const i = bodyEl.querySelector('[data-rpnum="' + keepNum.k + '"]'); if (i) { i.value = keepNum.v; i.focus(); } }
-    if (keepHex !== null) { const i = bodyEl.querySelector('[data-colorhex]'); if (i) { i.value = keepHex; i.focus(); } }
+    restoreScrollState(nextKey);
+    requestAnimationFrame(function () {
+      restoreScrollState(nextKey);
+    });
+    setTimeout(function () {
+      restoreScrollState(nextKey);
+    }, 30);
+
+    if (keepQ !== null) {
+      const i = bodyEl.querySelector('[data-q]');
+      if (i) {
+        i.value = keepQ;
+        i.focus();
+      }
+    }
+    if (keepRq !== null) {
+      const i = bodyEl.querySelector('[data-rq]');
+      if (i) {
+        i.value = keepRq;
+        i.focus();
+      }
+    }
+    if (keepCfg) {
+      const i = bodyEl.querySelector('[data-cfg="' + keepCfg.k + '"]');
+      if (i) {
+        i.value = keepCfg.v;
+        i.focus();
+      }
+    }
+    if (keepNum) {
+      const i = bodyEl.querySelector('[data-rpnum="' + keepNum.k + '"]');
+      if (i) {
+        i.value = keepNum.v;
+        i.focus();
+      }
+    }
+    if (keepHex !== null) {
+      const i = bodyEl.querySelector('[data-colorhex]');
+      if (i) {
+        i.value = keepHex;
+        i.focus();
+      }
+    }
+    if (keepTHex !== null) {
+      const i = bodyEl.querySelector('[data-texthex]');
+      if (i) {
+        i.value = keepTHex;
+        i.focus();
+      }
+    }
 
     applyMarquee();
 
-    setTimeout(function() {
+    setTimeout(function () {
       applyUserSize();
       applyPos();
+      restoreScrollState(nextKey);
     }, 50);
   }
 
   function updatePlayBtn() {
     if (!bodyEl) return;
-    bodyEl.querySelectorAll('[data-play]').forEach(function (b) { b.innerHTML = isPlaying ? ICONS.pause : ICONS.play; });
+    bodyEl.querySelectorAll('[data-play]').forEach(function (b) {
+      b.innerHTML = isPlaying ? ICONS.pause : ICONS.play;
+    });
     bodyEl.querySelectorAll('[data-notebtn]').forEach(function (b) {
       if (collapsed) b.innerHTML = isPlaying ? ICONS.pause : ICONS.play;
     });
     if (collapsed) {
       const cur = curTrack();
-      const wantYmin = isYtTrack(cur);
+      const wantYmin = isYtTrack(cur) && ytCurrentEmbed;
       const haveYmin = !!bodyEl.querySelector('.' + PFX + '-ymin');
       if (wantYmin !== haveYmin) render();
     }
@@ -2058,11 +3846,17 @@
     const w = root.offsetWidth || 110, h = root.offsetHeight || 46;
     const W = VW(), H = VH();
     const minY = TOPBAR;
-    if (posX < 0 || posY < 0) { posX = Math.max(8, W - w - 12); posY = Math.max(minY + 14, H - h - 80); }
+    if (posX < 0 || posY < 0) {
+      posX = Math.max(8, W - w - 12);
+      posY = Math.max(minY + 14, H - h - 80);
+    }
     const maxX = W - w - 4, maxY = H - h - 4;
-    if (posX < 4) posX = 4; if (maxX > 4 && posX > maxX) posX = maxX;
-    if (posY < minY) posY = minY; if (maxY > minY && posY > maxY) posY = maxY;
-    root.style.left = posX + 'px'; root.style.top = posY + 'px';
+    if (posX < 4) posX = 4;
+    if (maxX > 4 && posX > maxX) posX = maxX;
+    if (posY < minY) posY = minY;
+    if (maxY > minY && posY > maxY) posY = maxY;
+    root.style.left = posX + 'px';
+    root.style.top = posY + 'px';
   }
 
   let down = false, moved = false, fromHandle = false, sx = 0, sy = 0, bl = 0, bt = 0, bw = 0, bh = 0, lockUntil = 0;
@@ -2070,9 +3864,14 @@
   let activePointerId = null;
   let resizing = false, rsx = 0, rsy = 0, rsW = 0, rsH = 0, leftResize = false, startLeft = 0;
 
-  function clearLongPress() { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }
+  function clearLongPress() {
+    if (lpTimer) {
+      clearTimeout(lpTimer);
+      lpTimer = null;
+    }
+  }
 
-  const INTER_SEL = '[data-find],[data-q],[data-play],[data-prev],[data-next],[data-stab],[data-src],[data-rplay],[data-pl],[data-qadd],[data-resplay],[data-resadd],[data-resclear],[data-restoggle],[data-more],[data-queuetoggle],[data-rfind],[data-rchip],[data-rtab],[data-radiotoggle],[data-libtoggle],[data-pltoggle],[data-searchtab],[data-rptab],[data-savemanual],[data-saverp],[data-loadm],[data-loadrp],[data-vol],[data-plnew],[data-pladd],[data-plpopclose],[data-swatch],[data-colorreset],[data-colorclose],[data-sizereset],[data-opacity],[data-editm],[data-editrp],[data-renm],[data-renrp],[data-trkdel],[data-pltrack],[data-editback],[data-delm],[data-delrp],[data-pledit],[data-pldel],[data-rfav],[data-rdelfav],[data-yteye],[data-ytclose],[data-expandfull],[data-quickvibe],[data-rptoggle],[data-rpnum],[data-rplang],[data-profsel],[data-profpick],[data-profpopclose],[data-cfg],[data-resize],[data-resize-left],[data-cancel-search],[data-cancel-rp],[data-link],[data-bgapplytheme],[data-bgapplyall],[data-bgdeltheme],[data-bgdelall]';
+  const INTER_SEL = '[data-find],[data-q],[data-play],[data-prev],[data-next],[data-stab],[data-src],[data-rplay],[data-pl],[data-qadd],[data-resplay],[data-resadd],[data-resclear],[data-restoggle],[data-more],[data-queuetoggle],[data-clearqueue],[data-rfind],[data-rchip],[data-rtab],[data-somamore],[data-radiotoggle],[data-libtoggle],[data-pltoggle],[data-searchtab],[data-rptab],[data-savemanual],[data-saverp],[data-loadm],[data-loadrp],[data-vol],[data-plnew],[data-pladd],[data-plpopclose],[data-swatch],[data-textswatch],[data-colorreset],[data-colorclose],[data-sizereset],[data-opacity],[data-editm],[data-editrp],[data-renm],[data-renrp],[data-trkdel],[data-pltrack],[data-editback],[data-delm],[data-delrp],[data-pledit],[data-pldel],[data-rfav],[data-rdelfav],[data-yteye],[data-ytclose],[data-expandfull],[data-quickvibe],[data-rptoggle],[data-rpnum],[data-rplang],[data-profsel],[data-profpick],[data-profpopclose],[data-cfg],[data-resize],[data-resize-left],[data-cancel-search],[data-cancel-rp],[data-link],[data-bgapplytheme],[data-bgapplyall],[data-bgdeltheme],[data-bgdelall],[data-textpick],[data-texthex],[data-textapplytheme],[data-textapplyall],[data-textdel],[data-solidtoggle],[data-solidlighttoggle],[data-soliddarkall],[data-solidlightall],[data-solidnoneall],[data-opapplytheme],[data-opapplyall],[data-bg-url],[data-bg-file],[data-colorpick],[data-colorhex],[data-progress-seek],[data-accentapplytheme],[data-accentapplyall],[data-accentdel]';
 
   function onPointerDown(e) {
     const target = e.target;
@@ -2084,7 +3883,10 @@
       leftResize = !!lz;
       activePointerId = e.pointerId;
       const rect = root.getBoundingClientRect();
-      rsx = e.clientX; rsy = e.clientY; rsW = rect.width; rsH = rect.height;
+      rsx = e.clientX;
+      rsy = e.clientY;
+      rsW = rect.width;
+      rsH = rect.height;
       startLeft = rect.left;
       root.classList.add('resizing');
       try { (rz || lz).setPointerCapture(e.pointerId); } catch (_) {}
@@ -2096,13 +3898,17 @@
     if (themeBtn) {
       lpFired = false;
       clearLongPress();
-      sx = e.clientX; sy = e.clientY;
+      sx = e.clientX;
+      sy = e.clientY;
       lpTimer = setTimeout(function () {
         lpFired = true;
         clearLongPress();
-        try { if (navigator.vibrate) navigator.vibrate(15); } catch (_) {}
+        try {
+          if (navigator.vibrate) navigator.vibrate(15);
+        } catch (_) {}
         bgPending = currentBg() ? JSON.parse(JSON.stringify(currentBg())) : null;
-        colorPopOpen = true; render();
+        colorPopOpen = true;
+        render();
         lockUntil = Date.now() + 400;
       }, 500);
       return;
@@ -2114,11 +3920,17 @@
     if (!handle) return;
     if (e.button === 2) return;
 
-    down = true; moved = false; fromHandle = true;
+    down = true;
+    moved = false;
+    fromHandle = true;
     activePointerId = e.pointerId;
-    sx = e.clientX; sy = e.clientY;
+    sx = e.clientX;
+    sy = e.clientY;
     const rect = root.getBoundingClientRect();
-    bl = rect.left; bt = rect.top; bw = rect.width; bh = rect.height;
+    bl = rect.left;
+    bt = rect.top;
+    bw = rect.width;
+    bh = rect.height;
     try { handle.setPointerCapture(e.pointerId); } catch (_) {}
   }
 
@@ -2157,17 +3969,21 @@
     const dx = e.clientX - sx, dy = e.clientY - sy;
     if (!moved && Math.hypot(dx, dy) < 6) return;
     if (e.cancelable) e.preventDefault();
-    moved = true; root.classList.add('dragging');
+    moved = true;
+    root.classList.add('dragging');
     const W = VW(), H = VH();
     const minY = TOPBAR;
     let nx = bl + dx, ny = bt + dy;
     const maxX = W - bw - 4, maxY = H - bh - 4;
-    if (nx < 4) nx = 4; if (maxX > 4 && nx > maxX) nx = maxX;
-    if (ny < minY) ny = minY; if (maxY > minY && ny > maxY) ny = maxY;
-    posX = nx; posY = ny;
-    root.style.left = nx + 'px'; root.style.top = ny + 'px';
+    if (nx < 4) nx = 4;
+    if (maxX > 4 && nx > maxX) nx = maxX;
+    if (ny < minY) ny = minY;
+    if (maxY > minY && ny > maxY) ny = maxY;
+    posX = nx;
+    posY = ny;
+    root.style.left = nx + 'px';
+    root.style.top = ny + 'px';
   }
-
   function onPointerUp(e) {
     if (activePointerId !== null && e.pointerId !== activePointerId) return;
 
@@ -2186,7 +4002,10 @@
       const tb = e.target && e.target.closest && e.target.closest('[data-themebtn]');
       if (tb && !lpFired) {
         if (Date.now() >= lockUntil) {
-          theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]; saveTheme(); applyBackground(); render();
+          theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+          saveTheme();
+          applyBackground();
+          render();
           lockUntil = Date.now() + 600;
         }
       }
@@ -2194,35 +4013,55 @@
       lockUntil = Date.now() + 600;
       return;
     }
-    if (!down) { activePointerId = null; return; }
-    down = false; root.classList.remove('dragging');
+
+    if (!down) {
+      activePointerId = null;
+      return;
+    }
+
+    down = false;
+    root.classList.remove('dragging');
     activePointerId = null;
+
     const wasMoved = moved, wasHandle = fromHandle;
-    moved = false; fromHandle = false;
-    if (wasMoved) { savePos(); lockUntil = Date.now() + 400; return; }
+    moved = false;
+    fromHandle = false;
+
+    if (wasMoved) {
+      savePos();
+      lockUntil = Date.now() + 400;
+      return;
+    }
+
     if (wasHandle) {
       if (Date.now() < lockUntil) return;
       if (e && e.cancelable) e.preventDefault();
       lockUntil = Date.now() + 400;
+
       try {
         if (root) {
           const r = root.getBoundingClientRect();
-          if (collapsed) { posCollapsedX = Math.round(r.left); posCollapsedY = Math.round(r.top); }
-          else { posExpandedX = Math.round(r.left); posExpandedY = Math.round(r.top); }
+          if (collapsed) {
+            posCollapsedX = Math.round(r.left);
+            posCollapsedY = Math.round(r.top);
+          } else {
+            posExpandedX = Math.round(r.left);
+            posExpandedY = Math.round(r.top);
+          }
         }
       } catch (_) {}
+
       const prevRect = root.getBoundingClientRect();
       const W = VW(), H = VH();
-      
       const minX = 4, maxX_old = Math.max(0, W - prevRect.width - 4);
       const minY = TOPBAR, maxY_old = Math.max(0, H - prevRect.height - 4);
-      
+
       let ratioX = 0;
       if (maxX_old > minX) {
         ratioX = (prevRect.left - minX) / (maxX_old - minX);
         ratioX = Math.max(0, Math.min(1, ratioX));
       }
-      
+
       let ratioY = 0;
       if (maxY_old > minY) {
         ratioY = (prevRect.top - minY) / (maxY_old - minY);
@@ -2232,22 +4071,22 @@
       collapsed = !collapsed;
       userW = (collapsed ? sizeCollapsedW : sizeExpandedW) || userW;
       userH = (collapsed ? sizeCollapsedH : sizeExpandedH) || userH;
-      
-      try { 
-        const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); 
-        s.collapsed = collapsed; 
-        localStorage.setItem(LS_KEY, JSON.stringify(s)); 
+
+      try {
+        const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+        s.collapsed = collapsed;
+        localStorage.setItem(LS_KEY, JSON.stringify(s));
       } catch (_) {}
-      
+
       render();
-      
+
       const newRect = root.getBoundingClientRect();
       const maxX_new = Math.max(0, W - newRect.width - 4);
       const maxY_new = Math.max(0, H - newRect.height - 4);
-      
+
       posX = minX + ratioX * (maxX_new - minX);
       posY = minY + ratioY * (maxY_new - minY);
-      
+
       applyPos();
       savePos();
     }
@@ -2255,15 +4094,30 @@
 
   function onPointerCancel(e) {
     clearLongPress();
-    if (resizing) { resizing = false; leftResize = false; root.classList.remove('resizing'); saveSize(); }
-    if (down) { down = false; root.classList.remove('dragging'); }
+    if (resizing) {
+      resizing = false;
+      leftResize = false;
+      root.classList.remove('resizing');
+      saveSize();
+    }
+    if (down) {
+      down = false;
+      root.classList.remove('dragging');
+    }
     activePointerId = null;
   }
 
   function doSearch(q) {
     if (!q) return;
-    if (cfg.source === 'ytlink') { searchOneSource(YouTubeLink, q); return; }
+    if (cfg.source === 'ytlink') {
+      searchOneSource(YouTubeLink, q);
+      return;
+    }
     runSearch(q, searchTab === 'all' ? 'all' : 'src');
+  }
+
+  function rememberScroll() {
+    saveScrollState(renderedScrollKey);
   }
 
   function onClick(e) {
@@ -2271,162 +4125,805 @@
     const t = e.target;
     const inter = t.closest && t.closest(INTER_SEL);
     if (!inter) return;
-    const link = t.closest('[data-link]'); if (link) { window.open(link.getAttribute('data-link'), '_blank'); return; }
+
+    rememberScroll();
+
+    const link = t.closest('[data-link]');
+    if (link) {
+      window.open(link.getAttribute('data-link'), '_blank');
+      return;
+    }
+
     if (t.closest('[data-resize]') || t.closest('[data-resize-left]')) return;
-    if (t.closest('[data-quickvibe]')) { clearRpPulse(); rpQuickVibe(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-yteye]')) { ytHidden = !ytHidden; applyEyeState(); return; }
-    if (t.closest('[data-ytclose]')) { closeYt(); return; }
-    if (t.closest('[data-expandfull]')) { collapsed = false; clearRpPulse(); render(); lockUntil = Date.now() + 300; return; }
+
+    if (t.closest('[data-quickvibe]')) {
+      clearRpPulse();
+      rpQuickVibe();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-yteye]')) {
+      ytHidden = !ytHidden;
+      applyEyeState();
+      return;
+    }
+
+    if (t.closest('[data-ytclose]')) {
+      closeYt();
+      return;
+    }
+
+    if (t.closest('[data-expandfull]')) {
+      collapsed = false;
+      clearRpPulse();
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
     if (t.closest('[data-themebtn]')) {
       if (e.pointerType === 'mouse' || !e.pointerType) {
-        theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]; saveTheme(); applyBackground(); render();
+        theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+        saveTheme();
+        applyBackground();
+        render();
         lockUntil = Date.now() + 400;
       }
       return;
     }
-    const sw = t.closest('[data-swatch]'); if (sw) { setAccent(sw.getAttribute('data-swatch')); render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-sizereset]')) { userW = 0; userH = 0; saveSize(); applyUserSize(); applyPos(); render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-colorreset]')) { setAccent(''); cfg.opacity = -1; saveCfg(); bgPending = null; applyAccentVar(); render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-colorclose]')) { colorPopOpen = false; bgPending = null; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-bgapplytheme]')) { applyBgToTheme(theme, bgPending); bgPending = null; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-bgapplyall]')) { applyBgToAllThemes(bgPending); bgPending = null; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-bgdeltheme]')) { applyBgToTheme(theme, null); bgPending = null; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-bgdelall]')) { applyBgToAllThemes(null); bgPending = null; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-plpopclose]')) { plPop = null; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-profpopclose]')) { profPop = false; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-profsel]')) { profPop = !profPop; render(); lockUntil = Date.now() + 300; return; }
-    const pp = t.closest('[data-profpick]'); if (pp) { cfg.rpProfile = pp.getAttribute('data-profpick'); saveCfg(); profPop = false; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-resclear]')) { clearSearch(); clearRpPulse(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-restoggle]')) { resCollapsed = !resCollapsed; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-more]')) { searchMore(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-queuetoggle]')) { queueCollapsed = !queueCollapsed; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-searchtab]')) { searchOpen = !searchOpen; if (searchOpen) { radioOpen = false; rpOpen = false; libOpen = false; plOpen = false; } secScroll = 0; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-rptab]')) { rpOpen = !rpOpen; if (rpOpen) { searchOpen = false; radioOpen = false; libOpen = false; plOpen = false; } secScroll = 0; render(); lockUntil = Date.now() + 300; return; }
-    const rptg = t.closest('[data-rptoggle]'); if (rptg) {
-      const k = rptg.getAttribute('data-rptoggle');
-      cfg[k] = !cfg[k]; saveCfg();
-      if (k === 'rpAuto' && cfg.rpAuto) rpMsgCounter = 0;
-      render(); lockUntil = Date.now() + 300; return;
+
+    const sw = t.closest('[data-swatch]');
+    if (sw) {
+      setAccentForTheme(theme, sw.getAttribute('data-swatch'));
+      render();
+      lockUntil = Date.now() + 300;
+      return;
     }
-    const rpl2 = t.closest('[data-rplang]'); if (rpl2) { cfg.rpLang = rpl2.getAttribute('data-rplang'); saveCfg(); render(); lockUntil = Date.now() + 300; return; }
+
+    if (t.closest('[data-accentapplytheme]')) {
+      const hx = bodyEl.querySelector('[data-colorhex]');
+      setAccentForTheme(theme, hx ? hx.value.trim() : '');
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-accentapplyall]')) {
+      const hx = bodyEl.querySelector('[data-colorhex]');
+      setAccentForAll(hx ? hx.value.trim() : '');
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-accentdel]')) {
+      setAccentForTheme(theme, '');
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const tsw = t.closest('[data-textswatch]');
+    if (tsw) {
+      setTextColorForTheme(theme, tsw.getAttribute('data-textswatch'));
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-textapplytheme]')) {
+      const hx = bodyEl.querySelector('[data-texthex]');
+      setTextColorForTheme(theme, hx ? hx.value.trim() : '');
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-textapplyall]')) {
+      const hx = bodyEl.querySelector('[data-texthex]');
+      setTextColorForAll(hx ? hx.value.trim() : '');
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-textdel]')) {
+      setTextColorForTheme(theme, '');
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-solidtoggle]')) {
+      const on = !isSolidTheme();
+      if (on) setSolidLightForTheme(theme, false);
+      setSolidForTheme(theme, on);
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-solidlighttoggle]')) {
+      const on = !isSolidLightTheme();
+      if (on) setSolidForTheme(theme, false);
+      setSolidLightForTheme(theme, on);
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-soliddarkall]')) {
+      setSolidLightForAll(false);
+      setSolidForAll(true);
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-solidlightall]')) {
+      setSolidForAll(false);
+      setSolidLightForAll(true);
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-solidnoneall]')) {
+      setSolidForAll(false);
+      setSolidLightForAll(false);
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-opapplytheme]')) {
+      const op = (bgPending && typeof bgPending.opacity === 'number') ? bgPending.opacity : undefined;
+      if (typeof op === 'number') {
+        if (!cfg.bgByTheme[theme]) cfg.bgByTheme[theme] = {};
+        cfg.bgByTheme[theme].opacity = op;
+        saveCfg();
+        applyAccentVar();
+      }
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-opapplyall]')) {
+      const op = (bgPending && typeof bgPending.opacity === 'number') ? bgPending.opacity : undefined;
+      if (typeof op === 'number') {
+        THEMES.forEach(function (tm) {
+          if (!cfg.bgByTheme[tm]) cfg.bgByTheme[tm] = {};
+          cfg.bgByTheme[tm].opacity = op;
+        });
+        saveCfg();
+        applyAccentVar();
+      }
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-sizereset]')) {
+      userW = 0;
+      userH = 0;
+      saveSize();
+      applyUserSize();
+      applyPos();
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-colorreset]')) {
+      setAccentForTheme(theme, '');
+      cfg.opacity = -1;
+      saveCfg();
+      bgPending = null;
+      applyAccentVar();
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-colorclose]')) {
+      colorPopOpen = false;
+      bgPending = null;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-bgapplytheme]')) {
+      const b = bgForApplyOrCurrent();
+      applyBgToTheme(theme, b);
+      bgPending = null;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-bgapplyall]')) {
+      const b = bgForApplyOrCurrent();
+      applyBgToAllThemes(b);
+      bgPending = null;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-bgdeltheme]')) {
+      applyBgToTheme(theme, null);
+      bgPending = null;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-bgdelall]')) {
+      applyBgToAllThemes(null);
+      bgPending = null;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-plpopclose]')) {
+      plPop = null;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-profpopclose]')) {
+      profPop = false;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-profsel]')) {
+      profPop = !profPop;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const pp = t.closest('[data-profpick]');
+    if (pp) {
+      cfg.rpProfile = pp.getAttribute('data-profpick');
+      saveCfg();
+      profPop = false;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-resclear]')) {
+      clearSearch();
+      clearRpPulse();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-restoggle]')) {
+      resCollapsed = !resCollapsed;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-more]')) {
+      searchMore();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-queuetoggle]')) {
+      queueCollapsed = !queueCollapsed;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-clearqueue]')) {
+      clearQueue();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-searchtab]')) {
+      searchOpen = !searchOpen;
+      if (searchOpen) {
+        radioOpen = false;
+        rpOpen = false;
+        libOpen = false;
+        plOpen = false;
+      }
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-rptab]')) {
+      rpOpen = !rpOpen;
+      if (rpOpen) {
+        searchOpen = false;
+        radioOpen = false;
+        libOpen = false;
+        plOpen = false;
+      }
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const rptg = t.closest('[data-rptoggle]');
+    if (rptg) {
+      const k = rptg.getAttribute('data-rptoggle');
+      cfg[k] = !cfg[k];
+      saveCfg();
+      if (k === 'rpAuto' && cfg.rpAuto) rpMsgCounter = 0;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const rpl2 = t.closest('[data-rplang]');
+    if (rpl2) {
+      cfg.rpLang = rpl2.getAttribute('data-rplang');
+      saveCfg();
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
     if (t.closest('[data-plnew]')) {
       if (plPop === 'queue') createManualFromQueue();
       else if (typeof plPop === 'object' && plPop && plPop.kind === 'qtrack') createManualFromTrack(queue[plPop.i]);
-      else if (typeof plPop === 'object' && plPop && plPop.kind === 'restrack') { createManualFromTrack(results[plPop.i]); if (resultsRp) { addToRpPlaylist(results[plPop.i]); clearRpPulse(); } }
-      else createManualFromTrack(results[plPop]);
-      plPop = null; lockUntil = Date.now() + 300; return;
+      else if (typeof plPop === 'object' && plPop && plPop.kind === 'restrack') {
+        createManualFromTrack(results[plPop.i]);
+        if (resultsRp) {
+          addToRpPlaylist(results[plPop.i]);
+          clearRpPulse();
+        }
+      } else {
+        createManualFromTrack(results[plPop]);
+      }
+      plPop = null;
+      lockUntil = Date.now() + 300;
+      return;
     }
-    const pa = t.closest('[data-pladd]'); if (pa) {
+
+    const pa = t.closest('[data-pladd]');
+    if (pa) {
       let trk = null;
       if (plPop === 'queue') trk = curTrack();
       else if (typeof plPop === 'object' && plPop && plPop.kind === 'qtrack') trk = queue[plPop.i];
-      else if (typeof plPop === 'object' && plPop && plPop.kind === 'restrack') { trk = results[plPop.i]; if (resultsRp) { addToRpPlaylist(trk); clearRpPulse(); } }
-      else trk = results[plPop];
-      addTrackToManual(pa.getAttribute('data-pladd'), trk); lockUntil = Date.now() + 300; return;
+      else if (typeof plPop === 'object' && plPop && plPop.kind === 'restrack') {
+        trk = results[plPop.i];
+        if (resultsRp) {
+          addToRpPlaylist(trk);
+          clearRpPulse();
+        }
+      } else {
+        trk = results[plPop];
+      }
+      addTrackToManual(pa.getAttribute('data-pladd'), trk);
+      lockUntil = Date.now() + 300;
+      return;
     }
-    const stab = t.closest('[data-stab]'); if (stab) { searchTab = stab.getAttribute('data-stab'); render(); lockUntil = Date.now() + 300; return; }
-    const ra = t.closest('[data-resadd]'); if (ra) { enqueueResult(results[parseInt(ra.getAttribute('data-resadd'), 10)], false); lockUntil = Date.now() + 300; return; }
-    const rpl = t.closest('[data-resplay]'); if (rpl) { enqueueResult(results[parseInt(rpl.getAttribute('data-resplay'), 10)], true); lockUntil = Date.now() + 300; return; }
-    const qadd = t.closest('[data-qadd]'); if (qadd) { plPop = { kind: 'qtrack', i: parseInt(qadd.getAttribute('data-qadd'), 10) }; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-radiotoggle]')) { radioOpen = !radioOpen; if (radioOpen) { searchOpen = false; rpOpen = false; libOpen = false; plOpen = false; } secScroll = 0; render(); lockUntil = Date.now() + 300; return; }
-    const rt = t.closest('[data-rtab]'); if (rt) { radioTab = rt.getAttribute('data-rtab'); secScroll = 0; render(); lockUntil = Date.now() + 300; return; }
-    const rch = t.closest('[data-rchip]'); if (rch) { searchRadioBrowser(rch.getAttribute('data-rchip')); lockUntil = Date.now() + 300; return; }
-    const rfb = t.closest('[data-rfind]'); if (rfb) { const inp = bodyEl.querySelector('[data-rq]'); const q = inp ? inp.value.trim() : ''; if (q) searchRadioBrowser(q); lockUntil = Date.now() + 300; return; }
-    const rfav = t.closest('[data-rfav]'); if (rfav) { toggleRadioFav({ name: rfav.getAttribute('data-rfname'), url: rfav.getAttribute('data-rfav'), tag: rfav.getAttribute('data-rftag') }); lockUntil = Date.now() + 300; return; }
-    const rdf = t.closest('[data-rdelfav]'); if (rdf) { radioFav = radioFav.filter(function (s) { return s.url !== rdf.getAttribute('data-rdelfav'); }); saveRadioFav(); render(); lockUntil = Date.now() + 300; return; }
-    const rp = t.closest('[data-rplay]'); if (rp) { playRadio({ name: rp.getAttribute('data-rname'), url: rp.getAttribute('data-rplay'), tag: rp.getAttribute('data-rtag') }); lockUntil = Date.now() + 300; return; }
-    const sb = t.closest('[data-src]'); if (sb) { cfg.source = sb.getAttribute('data-src'); searchTab = 'src'; results = []; saveCfg(); render(); lockUntil = Date.now() + 300; return; }
-    const ren = t.closest('[data-renm]'); if (ren) { renamePlaylistManual(ren.getAttribute('data-renm')); lockUntil = Date.now() + 300; return; }
-    const renr = t.closest('[data-renrp]'); if (renr) { renamePlaylistRp(renr.getAttribute('data-renrp')); lockUntil = Date.now() + 300; return; }
-    const ed = t.closest('[data-pledit]'); if (ed) { renameItem(parseInt(ed.getAttribute('data-pledit'), 10)); lockUntil = Date.now() + 300; return; }
-    const del = t.closest('[data-pldel]'); if (del) { removeFromQueue(parseInt(del.getAttribute('data-pldel'), 10)); lockUntil = Date.now() + 300; return; }
-    const em = t.closest('[data-editm]'); if (em) { editId = em.getAttribute('data-editm'); editKind = 'm'; secScroll = 0; render(); lockUntil = Date.now() + 300; return; }
-    const er = t.closest('[data-editrp]'); if (er) { editId = er.getAttribute('data-editrp'); editKind = 'rp'; secScroll = 0; render(); lockUntil = Date.now() + 300; return; }
-    const td = t.closest('[data-trkdel]'); if (td) {
+
+    const stab = t.closest('[data-stab]');
+    if (stab) {
+      searchTab = stab.getAttribute('data-stab');
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const ra = t.closest('[data-resadd]');
+    if (ra) {
+      enqueueResult(results[parseInt(ra.getAttribute('data-resadd'), 10)], false);
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const rpl = t.closest('[data-resplay]');
+    if (rpl) {
+      enqueueResult(results[parseInt(rpl.getAttribute('data-resplay'), 10)], true);
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const qadd = t.closest('[data-qadd]');
+    if (qadd) {
+      plPop = { kind: 'qtrack', i: parseInt(qadd.getAttribute('data-qadd'), 10) };
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-radiotoggle]')) {
+      radioOpen = !radioOpen;
+      if (radioOpen) {
+        searchOpen = false;
+        rpOpen = false;
+        libOpen = false;
+        plOpen = false;
+      }
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const rt = t.closest('[data-rtab]');
+    if (rt) {
+      radioTab = rt.getAttribute('data-rtab');
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-somamore]')) {
+      loadMoreSomaStations();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const rch = t.closest('[data-rchip]');
+    if (rch) {
+      searchRadioBrowser(rch.getAttribute('data-rchip'));
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const rfb = t.closest('[data-rfind]');
+    if (rfb) {
+      const inp = bodyEl.querySelector('[data-rq]');
+      const q = inp ? inp.value.trim() : '';
+      if (q) searchRadioBrowser(q);
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const rfav = t.closest('[data-rfav]');
+    if (rfav) {
+      toggleRadioFav({
+        name: rfav.getAttribute('data-rfname'),
+        url: rfav.getAttribute('data-rfav'),
+        tag: rfav.getAttribute('data-rftag')
+      });
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const rdf = t.closest('[data-rdelfav]');
+    if (rdf) {
+      radioFav = radioFav.filter(function (s) {
+        return s.url !== rdf.getAttribute('data-rdelfav');
+      });
+      saveRadioFav();
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const rp = t.closest('[data-rplay]');
+    if (rp) {
+      playRadio({
+        name: rp.getAttribute('data-rname'),
+        url: rp.getAttribute('data-rplay'),
+        tag: rp.getAttribute('data-rtag')
+      });
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const sb = t.closest('[data-src]');
+    if (sb) {
+      cfg.source = sb.getAttribute('data-src');
+      searchTab = 'src';
+      results = [];
+      saveCfg();
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const ren = t.closest('[data-renm]');
+    if (ren) {
+      renamePlaylistManual(ren.getAttribute('data-renm'));
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const renr = t.closest('[data-renrp]');
+    if (renr) {
+      renamePlaylistRp(renr.getAttribute('data-renrp'));
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const ed = t.closest('[data-pledit]');
+    if (ed) {
+      renameItem(parseInt(ed.getAttribute('data-pledit'), 10));
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const del = t.closest('[data-pldel]');
+    if (del) {
+      removeFromQueue(parseInt(del.getAttribute('data-pldel'), 10));
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const em = t.closest('[data-editm]');
+    if (em) {
+      editId = em.getAttribute('data-editm');
+      editKind = 'm';
+      scrollMemory.lib = 0;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const er = t.closest('[data-editrp]');
+    if (er) {
+      editId = er.getAttribute('data-editrp');
+      editKind = 'rp';
+      scrollMemory.lib = 0;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const td = t.closest('[data-trkdel]');
+    if (td) {
       const i = parseInt(td.getAttribute('data-trkdel'), 10);
-      if (editKind === 'm') deleteTrackFromManual(editId, i); else deleteTrackFromRp(editId, i);
-      lockUntil = Date.now() + 300; return;
+      if (editKind === 'm') deleteTrackFromManual(editId, i);
+      else deleteTrackFromRp(editId, i);
+      lockUntil = Date.now() + 300;
+      return;
     }
-    const plt = t.closest('[data-pltrack]'); if (plt) {
+
+    const plt = t.closest('[data-pltrack]');
+    if (plt) {
       const i = parseInt(plt.getAttribute('data-pltrack'), 10);
       let pl = null;
       if (editKind === 'm') pl = lib.manual.find(function (x) { return x.id === editId; });
       else pl = lib.rp[editId];
-      if (pl && pl.tracks && pl.tracks[i]) { enqueueResult(pl.tracks[i], true); }
-      lockUntil = Date.now() + 300; return;
-    }
-    if (t.closest('[data-editback]')) { editId = null; editKind = null; secScroll = 0; render(); lockUntil = Date.now() + 300; return; }
-    const dm = t.closest('[data-delm]'); if (dm) { deleteManual(dm.getAttribute('data-delm')); lockUntil = Date.now() + 300; return; }
-    const dr = t.closest('[data-delrp]'); if (dr) { deleteRp(dr.getAttribute('data-delrp')); lockUntil = Date.now() + 300; return; }
-    const lm = t.closest('[data-loadm]'); if (lm) { const p = lib.manual.find(function (x) { return x.id === lm.getAttribute('data-loadm'); }); if (p) loadPlaylist(p.tracks); lockUntil = Date.now() + 300; return; }
-    const lr = t.closest('[data-loadrp]'); if (lr) { const p = lib.rp[lr.getAttribute('data-loadrp')]; if (p) loadPlaylist(p.tracks); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-savemanual]')) { plPop = 'queue'; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-saverp]')) { saveCurrentAsRp(); lockUntil = Date.now() + 300; return; }
-    const it = t.closest('[data-pl]'); if (it) { playIndex(parseInt(it.getAttribute('data-pl'), 10)); lockUntil = Date.now() + 300; return; }
 
-    if (t.closest('[data-cancel-search]')) { cancelSearch(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-cancel-rp]')) { cancelRp(); lockUntil = Date.now() + 300; return; }
+      if (pl && pl.tracks && pl.tracks[i]) {
+        queue.push(JSON.parse(JSON.stringify(pl.tracks[i])));
+        saveQueue();
+        playIndex(queue.length - 1);
+      }
+
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-editback]')) {
+      editId = null;
+      editKind = null;
+      scrollMemory.lib = 0;
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const dm = t.closest('[data-delm]');
+    if (dm) {
+      deleteManual(dm.getAttribute('data-delm'));
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const dr = t.closest('[data-delrp]');
+    if (dr) {
+      deleteRp(dr.getAttribute('data-delrp'));
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const lm = t.closest('[data-loadm]');
+    if (lm) {
+      const p = lib.manual.find(function (x) {
+        return x.id === lm.getAttribute('data-loadm');
+      });
+      if (p) loadPlaylist(p.tracks);
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const lr = t.closest('[data-loadrp]');
+    if (lr) {
+      const p = lib.rp[lr.getAttribute('data-loadrp')];
+      if (p) loadPlaylist(p.tracks);
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-savemanual]')) {
+      plPop = 'queue';
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-saverp]')) {
+      saveCurrentAsRp();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    const it = t.closest('[data-pl]');
+    if (it) {
+      playIndex(parseInt(it.getAttribute('data-pl'), 10));
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-cancel-search]')) {
+      cancelSearch();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-cancel-rp]')) {
+      cancelRp();
+      lockUntil = Date.now() + 300;
+      return;
+    }
 
     if (t.closest('[data-notebtn]')) {
-      if (moved) { lockUntil = Date.now() + 300; return; }
+      if (moved) {
+        lockUntil = Date.now() + 300;
+        return;
+      }
+
       if (!collapsed) {
         try {
           if (root) {
             const r = root.getBoundingClientRect();
-            if (collapsed) { posCollapsedX = Math.round(r.left); posCollapsedY = Math.round(r.top); }
-            else { posExpandedX = Math.round(r.left); posExpandedY = Math.round(r.top); }
+            if (collapsed) {
+              posCollapsedX = Math.round(r.left);
+              posCollapsedY = Math.round(r.top);
+            } else {
+              posExpandedX = Math.round(r.left);
+              posExpandedY = Math.round(r.top);
+            }
           }
         } catch (_) {}
+
         const prevRect = root.getBoundingClientRect();
         collapsed = true;
         posX = prevRect.left;
         posY = prevRect.top;
         userW = sizeCollapsedW || userW;
         userH = sizeCollapsedH || userH;
-        try { const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); s.collapsed = collapsed; localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch (_) {}
-        render(); lockUntil = Date.now() + 300; return;
+
+        try {
+          const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+          s.collapsed = collapsed;
+          localStorage.setItem(LS_KEY, JSON.stringify(s));
+        } catch (_) {}
+
+        render();
+        lockUntil = Date.now() + 300;
+        return;
       } else {
         const cur = curTrack();
         if (curIdx < 0) {
           if (window.__rpRadioNow) {
-            if (isPlaying) { try { audio.pause(); } catch(_){} isPlaying = false; }
-            else { try { audio.play(); } catch(_){} isPlaying = true; }
-            updatePlayBtn(); lockUntil = Date.now() + 300; return;
+            if (isPlaying) {
+              try { audio.pause(); } catch (_) {}
+              isPlaying = false;
+            } else {
+              try { audio.play(); } catch (_) {}
+              isPlaying = true;
+            }
+            updatePlayBtn();
+            lockUntil = Date.now() + 300;
+            return;
           }
-          statusMsg = 'Сначала найдите трек'; render(); lockUntil = Date.now() + 300; return;
+          statusMsg = 'Сначала найдите трек';
+          render();
+          lockUntil = Date.now() + 300;
+          return;
         }
-        if (isYtTrack(cur)) { return; }
-        if (isPlaying) { try { audio.pause(); } catch(_){} isPlaying = false; }
-        else { try { audio.play(); } catch(_){} isPlaying = true; }
-        updatePlayBtn(); lockUntil = Date.now() + 300; return;
+
+        if (isYtTrack(cur) && ytCurrentEmbed) return;
+
+        if (isPlaying) {
+          try { audio.pause(); } catch (_) {}
+          isPlaying = false;
+        } else {
+          playIndex(curIdx);
+          return;
+        }
+
+        updatePlayBtn();
+        lockUntil = Date.now() + 300;
+        return;
       }
     }
 
-    if (t.closest('[data-libtoggle]')) { libOpen = !libOpen; if (libOpen) { searchOpen = false; radioOpen = false; rpOpen = false; plOpen = false; editId = null; editKind = null; } secScroll = 0; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-pltoggle]')) { plOpen = !plOpen; if (plOpen) { searchOpen = false; radioOpen = false; rpOpen = false; libOpen = false; } secScroll = 0; render(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-play]')) { togglePlay(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-prev]')) { prevTrack(); lockUntil = Date.now() + 300; return; }
-    if (t.closest('[data-next]')) { nextTrack(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-libtoggle]')) {
+      libOpen = !libOpen;
+      if (libOpen) {
+        searchOpen = false;
+        radioOpen = false;
+        rpOpen = false;
+        plOpen = false;
+        editId = null;
+        editKind = null;
+      }
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-pltoggle]')) {
+      plOpen = !plOpen;
+      if (plOpen) {
+        searchOpen = false;
+        radioOpen = false;
+        rpOpen = false;
+        libOpen = false;
+      }
+      render();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-play]')) {
+      togglePlay();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-prev]')) {
+      prevTrack();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
+    if (t.closest('[data-next]')) {
+      nextTrack();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
     if (t.closest('[data-find]')) {
       const inp = bodyEl.querySelector('[data-q]');
       const q = inp ? inp.value.trim() : '';
-      if (q) { doSearch(q); if (inp) inp.value = ''; }
-      lockUntil = Date.now() + 300; return;
+      if (q) {
+        doSearch(q);
+        if (inp) inp.value = '';
+      }
+      lockUntil = Date.now() + 300;
+      return;
     }
   }
 
   function onKey(e) {
     if (e.target && e.target.hasAttribute('data-q') && e.key === 'Enter') {
       const q = e.target.value.trim();
-      if (q) { doSearch(q); e.target.value = ''; }
+      if (q) {
+        doSearch(q);
+        e.target.value = '';
+      }
     }
+
     if (e.target && e.target.hasAttribute('data-rq') && e.key === 'Enter') {
       const q = e.target.value.trim();
       if (q) searchRadioBrowser(q);
     }
   }
 
-    function onInput(e) {
+  function onInput(e) {
     const el = e.target;
     if (!el) return;
 
@@ -2444,17 +4941,30 @@
       const lbl = bodyEl.querySelector('.' + PFX + '-opval');
       if (lbl) lbl.textContent = val + '%';
     } else if (el.hasAttribute('data-colorpick')) {
-      setAccent(el.value);
-      applyAccentVar();
+      setAccentForTheme(theme, el.value);
       const hx = bodyEl.querySelector('[data-colorhex]');
       if (hx) hx.value = accentColor();
     } else if (el.hasAttribute('data-colorhex')) {
       const v = el.value.trim();
-      if (!v || validHex(v)) {
-        setAccent(v);
-        applyAccentVar();
+      if (!v) {
+        setAccentForTheme(theme, '');
+      } else if (validHex(v)) {
+        setAccentForTheme(theme, v);
         const cp = bodyEl.querySelector('[data-colorpick]');
-        if (cp && validHex(v)) cp.value = normHex(v);
+        if (cp) cp.value = normHex(v);
+      }
+    } else if (el.hasAttribute('data-textpick')) {
+      setTextColorForTheme(theme, el.value);
+      const hx = bodyEl.querySelector('[data-texthex]');
+      if (hx) hx.value = currentTextColor();
+    } else if (el.hasAttribute('data-texthex')) {
+      const v = el.value.trim();
+      if (!v) {
+        setTextColorForTheme(theme, '');
+      } else if (validHex(v)) {
+        setTextColorForTheme(theme, v);
+        const cp = bodyEl.querySelector('[data-textpick]');
+        if (cp) cp.value = normHex(v);
       }
     } else if (el.hasAttribute('data-bg-url')) {
       setBgPendingFromUrl(el.value || '');
@@ -2479,16 +4989,27 @@
       saveCfg();
     }
   }
+
   function bindChatEvents() {
     const c = stContext();
     if (!c || !c.eventSource || !c.eventTypes) return;
+
     try {
       const et = c.eventTypes;
       const evRecv = et.MESSAGE_RECEIVED || et.message_received;
       const evChat = et.CHAT_CHANGED || et.chat_changed;
-      if (evRecv) c.eventSource.on(evRecv, function () { onChatMessage(); });
-      if (evChat) c.eventSource.on(evChat, function () { rpMsgCounter = 0; clearRpPulse(); });
-    } catch (e) { console.warn('[RP_Player] bindChatEvents fail', e); }
+
+      if (evRecv) c.eventSource.on(evRecv, function () {
+        onChatMessage();
+      });
+
+      if (evChat) c.eventSource.on(evChat, function () {
+        rpMsgCounter = 0;
+        clearRpPulse();
+      });
+    } catch (e) {
+      console.warn('[RP_Player] bindChatEvents fail', e);
+    }
   }
 
   function start() {
@@ -2497,16 +5018,21 @@
       cleanupAll();
       injectStyles();
       loadQueue();
+
       const mount = getMount();
 
       root = document.createElement('div');
       root.className = PFX + '-root';
+
       shell = document.createElement('div');
       shell.className = PFX + '-shell';
+
       ytLayer = document.createElement('div');
       ytLayer.className = PFX + '-ytlayer';
+
       bodyEl = document.createElement('div');
       bodyEl.className = PFX + '-body';
+
       shell.appendChild(ytLayer);
       shell.appendChild(bodyEl);
       root.appendChild(shell);
@@ -2514,14 +5040,18 @@
 
       if (curIdx >= 0 && queue[curIdx]) {
         const t = queue[curIdx];
-        if (isYtTrack(t)) { ytCurrentEmbed = ytEmbedSrc(t); isPlaying = false; }
+        if (isYtTrack(t)) {
+          ytCurrentEmbed = null;
+          isPlaying = false;
+          statusMsg = 'Тапните трек, чтобы обновить поток';
+        }
       }
 
-            render();
+      render();
 
       setInterval(function () {
-        const wandMenu = $j('#extensionsMenu');
-        if (wandMenu.length > 0 && $j('#rp-player-wand-container').length === 0) {
+        const wandMenu = $j && $j('#extensionsMenu');
+        if (wandMenu && wandMenu.length > 0 && $j('#rp-player-wand-container').length === 0) {
           const wandBtnHtml = `
             <div id="rp-player-wand-container" class="extension_container interactable" tabindex="0">
                 <div id="rp-player-wand-btn" class="list-group-item flex-container flexGap5 interactable" tabindex="0">
@@ -2530,7 +5060,7 @@
             </div>
           `;
           wandMenu.append(wandBtnHtml);
-          
+
           $j('#rp-player-wand-btn').on('click', function () {
             if (root.style.display === 'none') {
               root.style.display = 'flex';
@@ -2543,8 +5073,8 @@
         }
       }, 1000);
 
-      const extMenu = $j('#extensions_popup .list-group');
-      if (extMenu.length > 0 && $j('#rp-player-ext-btn').length === 0) {
+      const extMenu = $j && $j('#extensions_popup .list-group');
+      if (extMenu && extMenu.length > 0 && $j('#rp-player-ext-btn').length === 0) {
         const extBtn = $j('<div id="rp-player-ext-btn" class="list-group-item interactive extensions_menu_item" tabindex="0">🎵 RP Music Player</div>');
         extBtn.on('click', function () {
           if (root.style.display === 'none') {
@@ -2554,12 +5084,12 @@
             root.style.display = 'none';
             $j('#rp_player_show_toggle').prop('checked', false);
           }
-          $j('#extensions_popup').hide(); 
+          $j('#extensions_popup').hide();
         });
         extMenu.append(extBtn);
       }
 
-      if ($j('#rp-player-extension-settings').length === 0) {
+      if ($j && $j('#rp-player-extension-settings').length === 0) {
         const extHtml = `
           <div class="inline-drawer" id="rp-player-extension-settings">
             <div class="inline-drawer-toggle inline-drawer-header">
@@ -2580,17 +5110,15 @@
         $j('#extensions_settings').append(extHtml);
         $j('#rp_player_show_toggle').on('change', function () {
           const isChecked = $j(this).is(':checked');
-          if (isChecked) {
-            root.style.display = 'flex';
-          } else {
-            root.style.display = 'none';
-          }
+          if (isChecked) root.style.display = 'flex';
+          else root.style.display = 'none';
         });
       }
 
       try { applyBackground(); } catch (_) {}
 
       const supportsPointer = (typeof window.PointerEvent !== 'undefined');
+
       if (supportsPointer) {
         root.addEventListener('pointerdown', onPointerDown);
         root.addEventListener('pointermove', onPointerMove);
@@ -2600,10 +5128,16 @@
         const wrap = function (fn) {
           return function (e) {
             const p = e.touches ? e.touches[0] : e;
-            if (p) { e.clientX = p.clientX; e.clientY = p.clientY; e.pointerId = 1; e.button = e.button || 0; }
+            if (p) {
+              e.clientX = p.clientX;
+              e.clientY = p.clientY;
+              e.pointerId = 1;
+              e.button = e.button || 0;
+            }
             fn(e);
           };
         };
+
         root.addEventListener('mousedown', wrap(onPointerDown));
         window.addEventListener('mousemove', wrap(onPointerMove));
         window.addEventListener('mouseup', wrap(onPointerUp));
@@ -2616,27 +5150,64 @@
       root.addEventListener('click', onClick);
       root.addEventListener('keydown', onKey);
       root.addEventListener('input', onInput);
+
       root.addEventListener('contextmenu', function (e) {
         const tb = e.target && e.target.closest && e.target.closest('[data-themebtn]');
-        if (tb) { e.preventDefault(); colorPopOpen = true; render(); }
+        if (tb) {
+          e.preventDefault();
+          colorPopOpen = true;
+          bgPending = currentBg() ? JSON.parse(JSON.stringify(currentBg())) : null;
+          render();
+        }
       });
 
       bindChatEvents();
 
-      try { if ($j) $j(window).on('pagehide.' + PFX + ' beforeunload.' + PFX, cleanupAll); } catch (_) {}
       try {
-        if ($j) $j(window).on('resize.' + PFX, function () { refreshTopbar(); applyUserSize(); applyPos(); });
-        else window.addEventListener('resize', function () { refreshTopbar(); applyUserSize(); applyPos(); });
+        if ($j) $j(window).on('pagehide.' + PFX + ' beforeunload.' + PFX, cleanupAll);
       } catch (_) {}
 
-      setTimeout(function () { refreshTopbar(); applyPos(); }, 200);
-      setTimeout(function () { refreshTopbar(); applyPos(); }, 800);
-      setTimeout(function () { refreshTopbar(); applyPos(); }, 2000);
-    } catch (err) { console.error('[RP_Player] init error:', err); }
+      try {
+        if ($j) {
+          $j(window).on('resize.' + PFX, function () {
+            refreshTopbar();
+            applyUserSize();
+            applyPos();
+          });
+        } else {
+          window.addEventListener('resize', function () {
+            refreshTopbar();
+            applyUserSize();
+            applyPos();
+          });
+        }
+      } catch (_) {}
+
+      setTimeout(function () {
+        refreshTopbar();
+        applyPos();
+      }, 200);
+
+      setTimeout(function () {
+        refreshTopbar();
+        applyPos();
+      }, 800);
+
+      setTimeout(function () {
+        refreshTopbar();
+        applyPos();
+      }, 2000);
+    } catch (err) {
+      console.error('[RP_Player] init error:', err);
+    }
   }
 
   $j = jq();
-  if ($j) { $j(start); }
-  else if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', start); }
-  else { start(); }
+  if ($j) {
+    $j(start);
+  } else if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
 })();
