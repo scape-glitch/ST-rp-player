@@ -12,6 +12,7 @@
 
   const PFX = 'rp-player';
   const LS_KEY = 'rp_player_pos_v4';
+  const LS_FAB = 'rp_player_fab_v1';
   const LS_CFG = 'rp_player_cfg_v1';
   const LS_QUEUE = 'rp_player_queue_v1';
   const LS_LIB = 'rp_player_lib_v1';
@@ -22,6 +23,11 @@
   const DEFAULT_YT_KEY = 'AIzaSyDMuAcY3e7h6EDCybpGVuwGbvq7lYJB18A';
   const BAIBAI_JS = 'https://drive.baibai.cv/f/ZKEBuW/Music.js';
 
+  const ALL_LS_KEYS = [
+    LS_KEY, LS_FAB, LS_CFG, LS_QUEUE, LS_LIB, LS_RADIO_FAV, LS_RP_REJECTED, LS_SIZE,
+    'rp_player_state_v1', 'rp_player_pos_v2', 'rp_player_pos_v3', 'liquidGlassPosition'
+  ];
+
   const THEMES = ['default', 'glass', 'neon', 'paper', 'minimal'];
   let theme = 'default';
   try {
@@ -29,18 +35,27 @@
     if (c.theme) theme = c.theme;
   } catch (_) {}
 
-  function log(...args) { console.log('[ST Player]', ...args); }
+  let DEBUG = true;
+  try {
+    const c = JSON.parse(localStorage.getItem(LS_CFG) || '{}');
+    if (typeof c.debug === 'boolean') DEBUG = c.debug;
+  } catch (_) {}
+
+  function log(...args) { if (DEBUG) console.log('[ST Player]', ...args); }
+  function info(...args) { console.log('[ST Player]', ...args); }
   function warn(...args) { console.warn('[ST Player]', ...args); }
   function error(...args) { console.error('[ST Player]', ...args); }
+  function dbg(tag, ...args) { if (DEBUG) console.log('[ST Player][' + tag + ']', ...args); }
 
   let cfg = {
     source: 'youtube', jamendoKey: '', ytKey: '', accent: '', opacity: -1,
     rpAuto: false, rpQuick: false, rpEvery: 10, rpCount: 5,
     rpProfile: '', rpTokenLimitOn: false, rpTokenLimit: 6000,
-    rpLang: '', rpLangCustom: '', rpQuickAutoplay: false,
+    rpLang: '', rpLangCustom: '', rpAutoplay: false, rpQuickAutoplay: false,
+    rpSource: 'auto', rpGenre: '', rpGenreCustom: '', rpUseFavorites: false,
     bgType: 'none', bgUrl: '', bgBase64: '', bgByTheme: {},
     textColor: '', textColorByTheme: {}, solidByTheme: {},
-    solidLightByTheme: {}, accentByTheme: {}
+    solidLightByTheme: {}, accentByTheme: {}, debug: true
   };
   try { cfg = Object.assign(cfg, JSON.parse(localStorage.getItem(LS_CFG) || '{}')); } catch (_) {}
   if (!cfg.bgByTheme || typeof cfg.bgByTheme !== 'object') cfg.bgByTheme = {};
@@ -48,11 +63,20 @@
   if (!cfg.solidByTheme || typeof cfg.solidByTheme !== 'object') cfg.solidByTheme = {};
   if (!cfg.solidLightByTheme || typeof cfg.solidLightByTheme !== 'object') cfg.solidLightByTheme = {};
   if (!cfg.accentByTheme || typeof cfg.accentByTheme !== 'object') cfg.accentByTheme = {};
+  if (typeof cfg.debug === 'boolean') DEBUG = cfg.debug;
+
+  (function migrateQuickAutoplay() {
+    try {
+      if (cfg.rpQuickAutoplay && !cfg.rpAutoplay) {
+        cfg.rpAutoplay = true;
+      }
+    } catch (_) {}
+  })();
 
   let bgPending = null;
 
   function saveCfg() {
-    try { localStorage.setItem(LS_CFG, JSON.stringify(cfg)); } catch (_) {}
+    try { localStorage.setItem(LS_CFG, JSON.stringify(cfg)); } catch (e) { warn('saveCfg fail', e); }
   }
   function jamKey() {
     return (cfg.jamendoKey || '').trim() || DEFAULT_JAMENDO_KEY;
@@ -78,7 +102,7 @@
     });
   } catch (_) {}
 
-  let collapsed = true;
+  let uiMode = 'pill';
   let searchOpen = false, libOpen = false, radioOpen = false, rpOpen = false, plOpen = false, radioTab = 'soma';
   let radioResults = [];
   let ytHidden = true;
@@ -90,19 +114,44 @@
   let rpPulse = false;
   let rpBusy = false;
 
+  let confirmDelete = null;
+  let exportPop = null;
+
+  let accAccent = false, accText = false, accSolid = false, accBg = false;
+  let rpAccLang = false, rpAccGenre = false, rpAccSource = false, rpAccBackup = false;
+
   let searchAbortController = null;
   let rpAbortController = null;
 
   let posCollapsedX = -1, posCollapsedY = -1;
   let posExpandedX = -1, posExpandedY = -1;
+  let posFabX = -1, posFabY = -1;
   let sizeCollapsedW = 0, sizeCollapsedH = 0;
   let sizeExpandedW = 0, sizeExpandedH = 0, posX = -1, posY = -1;
+  let sizeFabW = 0, sizeFabH = 0;
   let userW = 0, userH = 0;
 
   let audioCurrentTime = 0;
   let audioDuration = 0;
   let currentPlayId = 0;
 
+  Object.defineProperty(window, '__rpUiMode', {
+    configurable: true,
+    get: function () { return uiMode; }
+  });
+
+  function isCollapsed() {
+    return uiMode !== 'panel';
+  }
+  function isFab() {
+    return uiMode === 'fab';
+  }
+
+  let collapsed = true;
+  function syncCollapsed() {
+    collapsed = isCollapsed();
+  }
+  syncCollapsed();
   (function () {
     try {
       const s = JSON.parse(localStorage.getItem(LS_SIZE) || '{}');
@@ -110,6 +159,8 @@
       if (typeof s.collapsedH === 'number') sizeCollapsedH = s.collapsedH;
       if (typeof s.expandedW === 'number') sizeExpandedW = s.expandedW;
       if (typeof s.expandedH === 'number') sizeExpandedH = s.expandedH;
+      if (typeof s.fabW === 'number') sizeFabW = s.fabW;
+      if (typeof s.fabH === 'number') sizeFabH = s.fabH;
       if (typeof s.w === 'number' && sizeExpandedW === 0) sizeExpandedW = s.w;
       if (typeof s.h === 'number' && sizeExpandedH === 0) sizeExpandedH = s.h;
     } catch (e) {}
@@ -117,7 +168,10 @@
 
   function saveSize() {
     try {
-      if (collapsed) {
+      if (uiMode === 'fab') {
+        sizeFabW = userW || sizeFabW;
+        sizeFabH = userH || sizeFabH;
+      } else if (collapsed) {
         sizeCollapsedW = userW || sizeCollapsedW;
         sizeCollapsedH = userH || sizeCollapsedH;
       } else {
@@ -128,15 +182,22 @@
         collapsedW: sizeCollapsedW,
         collapsedH: sizeCollapsedH,
         expandedW: sizeExpandedW,
-        expandedH: sizeExpandedH
+        expandedH: sizeExpandedH,
+        fabW: sizeFabW,
+        fabH: sizeFabH
       }));
-    } catch (e) {}
+    } catch (e) { warn('saveSize fail', e); }
   }
 
   (function () {
     try {
       const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
-      if (typeof s.collapsed === 'boolean') collapsed = s.collapsed;
+      if (typeof s.uiMode === 'string') {
+        uiMode = s.uiMode;
+      } else if (typeof s.collapsed === 'boolean') {
+        uiMode = s.collapsed ? 'pill' : 'panel';
+      }
+      if (uiMode !== 'pill' && uiMode !== 'panel' && uiMode !== 'fab') uiMode = 'pill';
       if (typeof s.collapsedX === 'number') posCollapsedX = s.collapsedX;
       if (typeof s.collapsedY === 'number') posCollapsedY = s.collapsedY;
       if (typeof s.expandedX === 'number') posExpandedX = s.expandedX;
@@ -144,20 +205,46 @@
       if (typeof s.x === 'number' && posExpandedX === -1) posExpandedX = s.x;
       if (typeof s.y === 'number' && posExpandedY === -1) posExpandedY = s.y;
     } catch (e) {}
+    try {
+      const f = JSON.parse(localStorage.getItem(LS_FAB) || '{}');
+      if (typeof f.x === 'number') posFabX = f.x;
+      if (typeof f.y === 'number') posFabY = f.y;
+    } catch (e) {}
+    syncCollapsed();
   })();
 
+  function curPosX() {
+    if (uiMode === 'fab') return posFabX;
+    return collapsed ? posCollapsedX : posExpandedX;
+  }
+  function curPosY() {
+    if (uiMode === 'fab') return posFabY;
+    return collapsed ? posCollapsedY : posExpandedY;
+  }
+  function curSizeW() {
+    if (uiMode === 'fab') return sizeFabW;
+    return (collapsed ? sizeCollapsedW : sizeExpandedW) || 0;
+  }
+  function curSizeH() {
+    if (uiMode === 'fab') return sizeFabH;
+    return (collapsed ? sizeCollapsedH : sizeExpandedH) || 0;
+  }
+
   try {
-    posX = (collapsed ? posCollapsedX : posExpandedX);
-    posY = (collapsed ? posCollapsedY : posExpandedY);
-    userW = (collapsed ? sizeCollapsedW : sizeExpandedW) || 0;
-    userH = (collapsed ? sizeCollapsedH : sizeExpandedH) || 0;
+    posX = curPosX();
+    posY = curPosY();
+    userW = curSizeW();
+    userH = curSizeH();
   } catch (_) {}
 
   function savePos() {
     try {
       if (root) {
         const r = root.getBoundingClientRect();
-        if (collapsed) {
+        if (uiMode === 'fab') {
+          posFabX = Math.round(r.left);
+          posFabY = Math.round(r.top);
+        } else if (collapsed) {
           posCollapsedX = Math.round(r.left);
           posCollapsedY = Math.round(r.top);
         } else {
@@ -166,15 +253,26 @@
         }
       }
       localStorage.setItem(LS_KEY, JSON.stringify({
+        uiMode: uiMode,
         collapsed: collapsed,
         collapsedX: posCollapsedX,
         collapsedY: posCollapsedY,
         expandedX: posExpandedX,
         expandedY: posExpandedY
       }));
-      posX = (collapsed ? posCollapsedX : posExpandedX);
-      posY = (collapsed ? posCollapsedY : posExpandedY);
-    } catch (e) {}
+      localStorage.setItem(LS_FAB, JSON.stringify({ x: posFabX, y: posFabY }));
+      posX = curPosX();
+      posY = curPosY();
+    } catch (e) { warn('savePos fail', e); }
+  }
+
+  function persistUiMode() {
+    try {
+      const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+      s.uiMode = uiMode;
+      s.collapsed = collapsed;
+      localStorage.setItem(LS_KEY, JSON.stringify(s));
+    } catch (_) {}
   }
 
   let $j;
@@ -292,6 +390,16 @@
     return m + ':' + (s < 10 ? '0' : '') + s;
   }
 
+  function sliderFill(el, val, max) {
+    if (!el) return;
+    const m = max > 0 ? max : 100;
+    const pct = Math.max(0, Math.min(100, (val / m) * 100));
+    el.style.background =
+      'linear-gradient(to right, var(--rp-accent, #7aa6ff) 0%, var(--rp-accent, #7aa6ff) ' + pct +
+      '%, var(--rp-accent-soft, rgba(122,166,255,0.22)) ' + pct +
+      '%, var(--rp-accent-soft, rgba(122,166,255,0.22)) 100%)';
+  }
+
   function updateProgressBarUI() {
     if (!bodyEl || collapsed) return;
     const sld = bodyEl.querySelector('.' + PFX + '-progress-slider');
@@ -300,9 +408,16 @@
     if (sld) {
       sld.value = audioCurrentTime;
       sld.max = audioDuration || 100;
+      sliderFill(sld, audioCurrentTime, audioDuration || 100);
     }
     if (curLbl) curLbl.textContent = formatTime(audioCurrentTime);
     if (durLbl) durLbl.textContent = formatTime(audioDuration);
+  }
+
+  function updateVolUI() {
+    if (!bodyEl) return;
+    const v = bodyEl.querySelector('[data-vol]');
+    if (v) sliderFill(v, Math.round(audio.volume * 100), 100);
   }
 
   let results = [];
@@ -310,12 +425,14 @@
   let resultsRp = false;
   let searchState = { query: '', scope: 'all', srcIdx: 0, offsets: {}, ytTokens: {}, exhausted: false };
 
-  let lib = { manual: [], rp: {} };
-  try { lib = Object.assign({ manual: [], rp: {} }, JSON.parse(localStorage.getItem(LS_LIB) || '{}')); } catch (_) {}
+  let lib = { manual: [], rp: {}, favorites: [] };
+  try { lib = Object.assign({ manual: [], rp: {}, favorites: [] }, JSON.parse(localStorage.getItem(LS_LIB) || '{}')); } catch (_) {}
+  if (!Array.isArray(lib.manual)) lib.manual = [];
+  if (!lib.rp || typeof lib.rp !== 'object') lib.rp = {};
+  if (!Array.isArray(lib.favorites)) lib.favorites = [];
   function saveLib() {
-    try { localStorage.setItem(LS_LIB, JSON.stringify(lib)); } catch (_) {}
+    try { localStorage.setItem(LS_LIB, JSON.stringify(lib)); } catch (e) { warn('saveLib fail', e); }
   }
-
   let radioFav = [];
   try {
     const a = JSON.parse(localStorage.getItem(LS_RADIO_FAV) || '[]');
@@ -347,6 +464,81 @@
     }
     saveRadioFav();
     render();
+  }
+
+  const FAV_CHAT_KEY = '__favorites__';
+
+  function trackSigForFav(t) {
+    if (!t) return '';
+    if (t.ytid) return 'yt:' + t.ytid;
+    if (t.url) return 'url:' + t.url;
+    return rpTrackSig(t);
+  }
+
+  function isFav(t) {
+    const sig = trackSigForFav(t);
+    if (!sig) return false;
+    return lib.favorites.some(function (x) { return trackSigForFav(x) === sig; });
+  }
+
+  function toggleFav(t) {
+    if (!t) return;
+    const sig = trackSigForFav(t);
+    if (!sig) return;
+    const idx = lib.favorites.findIndex(function (x) { return trackSigForFav(x) === sig; });
+    if (idx >= 0) {
+      lib.favorites.splice(idx, 1);
+      dbg('fav', 'removed', rpTrackHuman(t));
+    } else {
+      const copy = JSON.parse(JSON.stringify(t));
+      delete copy._rpSuggestedChat;
+      delete copy._rpWhy;
+      delete copy.why;
+      lib.favorites.push(copy);
+      dbg('fav', 'added', rpTrackHuman(t));
+    }
+    saveLib();
+    render();
+  }
+
+  function trackExistsAnywhereExceptRemoval(sig, exclude) {
+    if (!sig) return true;
+    function has(arr) {
+      if (!Array.isArray(arr)) return false;
+      return arr.some(function (t) {
+        return t && t !== exclude && trackSigForFav(t) === sig;
+      });
+    }
+    if (has(queue)) return true;
+    if (has(lib.favorites)) return true;
+    for (let i = 0; i < lib.manual.length; i++) {
+      if (lib.manual[i] && has(lib.manual[i].tracks)) return true;
+    }
+    const keys = Object.keys(lib.rp);
+    for (let i = 0; i < keys.length; i++) {
+      if (lib.rp[keys[i]] && has(lib.rp[keys[i]].tracks)) return true;
+    }
+    return false;
+  }
+
+  function markGlobalDislike(track) {
+    if (!track) return;
+    const sig = trackSigForFav(track);
+    if (!sig) return;
+    if (trackExistsAnywhereExceptRemoval(sig, track)) {
+      dbg('dislike', 'skip (still exists elsewhere)', rpTrackHuman(track));
+      return;
+    }
+    const cid = getChatId();
+    const rsig = rpTrackSig(track);
+    if (!rsig) return;
+    if (!rpRejected[cid]) rpRejected[cid] = [];
+    if (rpRejected[cid].indexOf(rsig) < 0) {
+      rpRejected[cid].push(rsig);
+      rpRejected[cid] = rpRejected[cid].slice(-300);
+      saveRpRejected();
+      dbg('dislike', 'global dislike recorded', rpTrackHuman(track));
+    }
   }
 
   const SOMA_STATIONS = [
@@ -385,7 +577,7 @@
   const RADIO_CHIPS = [
     'jazz', 'lofi', 'ambient', 'rock', 'classical', 'chill', 'electronic', 'pop', 'metal', 'folk',
     'rap', 'hip-hop', 'trip-hop', 'alternative', 'indie', 'underground', 'punk', 'post-punk',
-    'industrial', 'darkwave', 'goth', 'crunkcore', 'breakcore', 'drum and bass', 'dubstep',
+    'industrial', 'darkwave', 'goth', 'blues', 'breakcore', 'drum and bass', 'dubstep',
     'synthpop', 'vaporwave', 'funk', 'soul'
   ];
 
@@ -434,8 +626,10 @@
 
       somaLoadedFromApi = true;
       statusMsg = added ? ('Добавлено станций: ' + added) : 'Все станции SomaFM уже загружены';
+      dbg('soma', 'loaded', added, 'new stations');
     } catch (e) {
       statusMsg = 'Не удалось загрузить SomaFM';
+      warn('soma load fail', e);
     }
 
     somaLoading = false;
@@ -453,6 +647,24 @@
     { id: 'Chinese', label: '中文' },
     { id: 'Spanish', label: 'Español' },
     { id: 'Italian', label: 'Italiano' }
+  ];
+
+  const RP_GENRES = [
+    { id: '', label: 'Любой' },
+    { id: 'rock', label: 'Рок' },
+    { id: 'pop', label: 'Поп' },
+    { id: 'metal', label: 'Метал' },
+    { id: 'jazz', label: 'Джаз' },
+    { id: 'classical', label: 'Классика' },
+    { id: 'electronic', label: 'Электроника' },
+    { id: 'ambient', label: 'Эмбиент' },
+    { id: 'lofi', label: 'Lo-fi' },
+    { id: 'hip-hop', label: 'Хип-хоп' },
+    { id: 'folk', label: 'Фолк' },
+    { id: 'blues', label: 'Блюз' },
+    { id: 'soundtrack', label: 'Саундтрек' },
+    { id: 'indie', label: 'Инди' },
+    { id: 'punk', label: 'Панк' }
   ];
 
   function currentBg() {
@@ -654,7 +866,7 @@
     else if (isSolidTheme()) root.classList.add(PFX + '-solid');
   }
 
-    function playRadio(station) {
+  function playRadio(station) {
     currentPlayId++;
     stopAudio();
     stopYt();
@@ -664,21 +876,22 @@
     saveQueue();
 
     audio.src = station.url;
+    dbg('radio', 'play', station.name, station.url);
 
     audio.play().then(function () {
       isPlaying = true;
       window.__rpRadioNow = station;
       render();
-    }).catch(function () {
+    }).catch(function (e) {
       isPlaying = false;
       statusMsg = 'Радио недоступно';
+      warn('radio play fail', station.name, e);
       render();
     });
 
     window.__rpRadioNow = station;
     render();
   }
-
 
   async function searchRadioBrowser(q) {
     statusMsg = 'Поиск радио…';
@@ -707,8 +920,10 @@
         };
       });
       statusMsg = radioResults.length ? '' : 'Ничего не найдено';
+      dbg('radio', 'browser search', q, '->', radioResults.length);
     } catch (e) {
       statusMsg = 'Ошибка поиска радио';
+      warn('radio browser fail', e);
     }
     render();
   }
@@ -728,9 +943,11 @@
       s.onload = function () {
         baibaiLoaded = true;
         baibaiLoading = false;
+        dbg('baibai', 'loaded');
       };
       s.onerror = function () {
         baibaiLoading = false;
+        warn('baibai load fail');
       };
       (document.head || document.documentElement).appendChild(s);
     } catch (_) {
@@ -826,7 +1043,7 @@
             }));
           }
         } catch (e) {
-          console.warn('[RP_Player] Invidious search fail on ' + url);
+          warn('Invidious search fail on ' + url);
         }
       }
       return null;
@@ -970,6 +1187,16 @@
 
   const ALL_SOURCES = [YouTubeAPI, Jamendo, Baibai, CCMixter, FMA];
 
+  function srcByKey(key) {
+    if (key === 'youtube') return YouTubeAPI;
+    if (key === 'jamendo') return Jamendo;
+    if (key === 'baibai') return Baibai;
+    if (key === 'ccmixter') return CCMixter;
+    if (key === 'fma') return FMA;
+    if (key === 'ytlink') return YouTubeLink;
+    return null;
+  }
+
   async function fetchTimeout(url, ms = 4500) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), ms);
@@ -1004,7 +1231,7 @@
   let cachedInvidious = [];
   let invFetchTime = 0;
 
-    async function tryInvidiousStream(videoId) {
+  async function tryInvidiousStream(videoId) {
     const fallback = ['https://inv.thepixora.com', 'https://invidious.jing.rocks', 'https://yt.artemislena.eu', 'https://invidious.private.coffee'];
     let instances = fallback;
 
@@ -1050,7 +1277,6 @@
 
     return await Promise.any(promises).catch(function () { return null; });
   }
-
   let cachedPiped = [];
   let pipedFetchTime = 0;
 
@@ -1103,31 +1329,31 @@
     query = query.replace(/\b(official|music video|audio|hd|hq|lyrics|video)\b/gi, '').replace(/\s+/g, ' ').trim();
 
     if (query.length > 2) {
-      console.log(`[RP_Player] Пробуем NetEase API для: "${query}"`);
+      dbg('stream', 'try NetEase for', query);
       const neteaseUrl = await getNetEaseStream(query);
       if (neteaseUrl) {
-        console.log('[RP_Player] Успех! Звук вытянут через NetEase API');
+        dbg('stream', 'NetEase OK');
         return neteaseUrl;
       }
     }
 
     if (!track.ytid) return null;
 
-    console.log(`[RP_Player] Пробуем Invidious API для ID: ${track.ytid}`);
+    dbg('stream', 'try Invidious for', track.ytid);
     const invUrl = await tryInvidiousStream(track.ytid);
     if (invUrl) {
-      console.log('[RP_Player] Успех! Звук вытянут через Invidious');
+      dbg('stream', 'Invidious OK');
       return invUrl;
     }
 
-    console.log(`[RP_Player] Пробуем Piped API для ID: ${track.ytid}`);
+    dbg('stream', 'try Piped for', track.ytid);
     const pipedUrl = await tryPipedStream(track.ytid);
     if (pipedUrl) {
-      console.log('[RP_Player] Успех! Звук вытянут через Piped');
+      dbg('stream', 'Piped OK');
       return pipedUrl;
     }
 
-    console.warn('[RP_Player] Все обходы не сработали');
+    warn('all stream fallbacks failed for', track.ytid);
     return null;
   }
 
@@ -1171,6 +1397,7 @@
   }
 
   async function srcMany(src, query, limit, offset, controller) {
+    dbg('search', 'srcMany via', src.name, '| q=', query, '| off=', offset);
     if (src === YouTubeAPI) {
       const token = searchState.ytTokens[src.name] || null;
       const r = await withTimeout(src.searchMany(query, limit, offset, token, controller), 8000, controller);
@@ -1185,6 +1412,7 @@
     statusMsg = 'Поиск…';
     resultsRp = false;
     render();
+    dbg('search', 'searchOneSource via', src.name, '| q=', query);
     searchAbortController = new AbortController();
     try {
       const r = await withTimeout(src.search(query, searchAbortController), 8000, searchAbortController);
@@ -1201,7 +1429,7 @@
       statusMsg = 'Не найдено: ' + query;
     } catch (e) {
       if (e.message === 'aborted') statusMsg = 'Поиск отменён';
-      else statusMsg = src.name + ': ошибка';
+      else { statusMsg = src.name + ': ошибка'; warn('searchOneSource error', src.name, e); }
     }
     searching = false;
     searchAbortController = null;
@@ -1214,6 +1442,7 @@
     results = [];
     resultsRp = false;
     render();
+    dbg('search', 'topOneSource via', src.name, '| q=', query);
     searchState = { query: query, scope: 'src', srcIdx: 0, offsets: {}, ytTokens: {}, exhausted: false };
     searchAbortController = new AbortController();
     try {
@@ -1224,7 +1453,7 @@
       statusMsg = results.length ? '' : 'Ничего не найдено';
     } catch (e) {
       if (e.message === 'aborted') statusMsg = 'Поиск отменён';
-      else statusMsg = src.name + ': ошибка';
+      else { statusMsg = src.name + ': ошибка'; warn('topOneSource error', src.name, e); }
     }
     searching = false;
     searchAbortController = null;
@@ -1248,7 +1477,7 @@
       if (results.length === before) searchState.exhausted = true;
     } catch (e) {
       if (e.message === 'aborted') statusMsg = 'Поиск отменён';
-      else statusMsg = src.name + ': ошибка';
+      else { statusMsg = src.name + ': ошибка'; warn('moreOneSource error', e); }
     }
     searching = false;
     searchAbortController = null;
@@ -1286,6 +1515,7 @@
           render();
           return;
         }
+        warn('findExactAll error', src.name, e);
       }
     }
     statusMsg = 'Нигде не найдено: ' + query;
@@ -1323,6 +1553,7 @@
           render();
           return;
         }
+        warn('topAll error', src.name, e);
       }
     }
     results = acc.slice(0, 200);
@@ -1357,6 +1588,7 @@
           render();
           return;
         }
+        warn('moreAll error', src.name, e);
       }
     }
     results = acc.slice(0, 200);
@@ -1375,6 +1607,7 @@
   function runSearch(query, scope) {
     if (!query) return;
     const exact = hasDash(query);
+    dbg('search', 'runSearch | scope=', scope, '| source=', cfg.source, '| exact=', exact, '| q=', query);
     if (scope === 'all') {
       if (cfg.source === 'ytlink') {
         searchOneSource(YouTubeLink, query);
@@ -1384,6 +1617,7 @@
       else topAll(query);
     } else {
       const src = activeSource();
+      dbg('search', 'scope=src -> activeSource=', src.name);
       if (src === YouTubeLink) {
         searchOneSource(src, query);
         return;
@@ -1448,9 +1682,19 @@
     else render();
   }
 
+  function rpSourceOrder() {
+    if (cfg.rpSource === 'youtube') return [YouTubeAPI];
+    if (cfg.rpSource === 'jamendo') return [Jamendo];
+    if (cfg.rpSource === 'baibai') return [Baibai];
+    return ALL_SOURCES;
+  }
+
   async function findTrackForRp(query, controller, extraAvoidSigs) {
-    for (let k = 0; k < ALL_SOURCES.length; k++) {
-      const src = ALL_SOURCES[k];
+    const order = rpSourceOrder();
+    dbg('rp', 'findTrackForRp via', order.map(function (s) { return s.name; }).join(','), '| q=', query);
+
+    for (let k = 0; k < order.length; k++) {
+      const src = order[k];
 
       try {
         let candidates = [];
@@ -1473,6 +1717,7 @@
         }
       } catch (e) {
         if (e.message === 'aborted') throw e;
+        warn('findTrackForRp src error', src.name, e);
       }
     }
 
@@ -1709,7 +1954,7 @@
     return ytApiPromise;
   }
 
-    async function checkYtEmbedAllowed(videoId) {
+  async function checkYtEmbedAllowed(videoId) {
     if (!videoId) return false;
 
     try {
@@ -1979,7 +2224,7 @@
     if (queue.length) playIndex((curIdx - 1 + queue.length) % queue.length);
   }
 
-    function removeFromQueue(i) {
+  function removeFromQueue(i) {
     if (i < 0 || i >= queue.length) return;
 
     const removed = queue[i];
@@ -1988,6 +2233,7 @@
     if (removed && removed._rpSuggestedChat === getChatId()) markRpRejected(removed);
 
     queue.splice(i, 1);
+    if (removed) markGlobalDislike(removed);
 
     if (i < curIdx) {
       curIdx--;
@@ -2021,7 +2267,7 @@
     render();
   }
 
-    function clearQueue() {
+  function clearQueue() {
     if (!queue.length) return;
 
     currentPlayId++;
@@ -2045,7 +2291,6 @@
     saveQueue();
     render();
   }
-
   function renameItem(i) {
     if (i < 0 || i >= queue.length) return;
     const cur = queue[i].title || '';
@@ -2219,6 +2464,12 @@
     render();
   }
 
+  function deleteFavorites() {
+    lib.favorites = [];
+    saveLib();
+    render();
+  }
+
   function deleteTrackFromManual(plId, idx) {
     const p = lib.manual.find(function (x) { return x.id === plId; });
     if (!p || !Array.isArray(p.tracks)) return;
@@ -2228,6 +2479,7 @@
 
     p.tracks.splice(idx, 1);
     saveLib();
+    if (removed) markGlobalDislike(removed);
     render();
   }
 
@@ -2240,6 +2492,16 @@
 
     p.tracks.splice(idx, 1);
     saveLib();
+    if (removed) markGlobalDislike(removed);
+    render();
+  }
+
+  function deleteTrackFromFav(idx) {
+    if (idx < 0 || idx >= lib.favorites.length) return;
+    const removed = lib.favorites[idx];
+    lib.favorites.splice(idx, 1);
+    saveLib();
+    if (removed) markGlobalDislike(removed);
     render();
   }
 
@@ -2275,6 +2537,11 @@
     return '';
   }
 
+  function profileExists(id) {
+    if (!id) return false;
+    return getProfiles().some(function (x) { return x.id === id; });
+  }
+
   function profileName(id) {
     if (!id) return 'Текущий профиль';
     const p = getProfiles().find(function (x) { return x.id === id; });
@@ -2299,11 +2566,17 @@
     });
   }
 
-    function langLine() {
+  function langLine() {
     let lang = cfg.rpLang;
     if (lang === 'custom') lang = (cfg.rpLangCustom || '').trim();
     if (!lang) return '';
     return '- Prefer tracks with lyrics in ' + lang + '.';
+  }
+
+  function genreValue() {
+    let g = cfg.rpGenre;
+    if (g === 'custom') g = (cfg.rpGenreCustom || '').trim();
+    return g || '';
   }
 
   function normTrackPart(s) {
@@ -2425,9 +2698,18 @@
     return avoid.indexOf(sig) >= 0;
   }
 
+  function getFavoriteHints(limit) {
+    if (!cfg.rpUseFavorites) return [];
+    if (!Array.isArray(lib.favorites) || !lib.favorites.length) return [];
+    const arr = lib.favorites.slice(-(limit || 30));
+    return arr.map(function (t) { return rpTrackHuman(t); }).filter(Boolean);
+  }
+
   function buildRpPrompt(count, messages, avoidList) {
     let lang = cfg.rpLang;
     if (lang === 'custom') lang = (cfg.rpLangCustom || '').trim();
+
+    const genre = genreValue();
 
     let langHard = '';
     let langTop = '';
@@ -2439,6 +2721,18 @@
         'Instrumental tracks are allowed only if no ' + lang + ' vocal track fits.\n\n';
       langHard = '\n\n=== FINAL CHECK BEFORE OUTPUT ===\n' +
         'Re-read every track. Confirm EACH ONE is sung in ' + lang + '. If any track is not in ' + lang + ', REPLACE it now with a real ' + lang + ' song. Output ONLY after all tracks are in ' + lang + '.';
+    }
+
+    let genreReq = '';
+    if (genre && genre.toLowerCase() !== 'any' && genre.toLowerCase() !== 'любой') {
+      genreReq = '- Strongly prefer the genre / style: ' + genre + '. Stay within this genre unless it clearly clashes with the scene.\n';
+    }
+
+    let favReq = '';
+    const favHints = getFavoriteHints(30);
+    if (favHints.length) {
+      favReq = '\nThe user LIKED these tracks (use them to understand the user taste in artists, genres, mood — lean toward similar vibes, but do NOT just repeat these exact tracks):\n' +
+        favHints.map(function (x) { return '- ' + x; }).join('\n') + '\n';
     }
 
     let avoidReq = '';
@@ -2460,7 +2754,9 @@
       '- Emotional tone of the track MUST match the scene (dramatic=intense, sad=melancholic, tense=dark, romantic=tender).\n' +
       '- You MAY repeat an artist if the track title is different.\n' +
       '- You MUST NOT repeat the exact same artist + track pair from the exclusion list.\n' +
+      genreReq +
       (lang ? '- REMINDER: ALL tracks MUST be in ' + lang + '. No exceptions.\n' : '') +
+      favReq +
       avoidReq +
       '\n(variation token, ignore: ' + seed + ')\n' +
       '\nReturn STRICTLY valid JSON, one line, no markdown:\n' +
@@ -2499,12 +2795,21 @@
   async function callModel(prompt) {
     const c = stContext();
     if (!c) throw new Error('no ST context');
-    const profId = selectedProfileId();
+
+    let profId = selectedProfileId();
+
+    if (profId && !profileExists(profId)) {
+      warn('callModel: profile id not found in profiles list, falling back to current ST profile. id=', profId);
+      statusMsg = 'Профиль плеера не найден, использую текущий профиль Таверны…';
+      render();
+      profId = '';
+    }
 
     const maxTok = cfg.rpTokenLimitOn ? (parseInt(cfg.rpTokenLimit, 10) || 6000) : undefined;
 
     if (profId && c.ConnectionManagerRequestService && c.ConnectionManagerRequestService.sendRequest) {
       try {
+        dbg('rp', 'callModel via CMRS, profile=', profileName(profId), 'maxTok=', maxTok);
         const resp = await c.ConnectionManagerRequestService.sendRequest(profId, prompt, maxTok);
         if (typeof resp === 'string') return resp;
         if (resp && typeof resp.content === 'string') return resp.content;
@@ -2513,11 +2818,14 @@
         }
         return '';
       } catch (e) {
-        console.warn('[RP_Player] CMRS error, fallback', e);
+        warn('CMRS sendRequest error, fallback to generateQuietPrompt', e);
+        statusMsg = 'Ошибка профиля подключения, пробую текущий профиль Таверны…';
+        render();
       }
     }
 
     if (c.generateQuietPrompt) {
+      dbg('rp', 'callModel via generateQuietPrompt (current ST profile)');
       const r = await c.generateQuietPrompt(prompt, false, false);
       return (typeof r === 'string') ? r : '';
     }
@@ -2557,6 +2865,7 @@
 
       if (!picks.length) {
         statusMsg = 'ИИ не вернул треки (проверьте профиль)';
+        warn('RP: parsed 0 tracks. raw len=', (raw || '').length);
         rpBusy = false;
         searching = false;
         rpAbortController = null;
@@ -2590,6 +2899,7 @@
           }
         } catch (e) {
           if (e.message === 'aborted') throw e;
+          warn('RP find track error', e);
         }
       }
 
@@ -2602,13 +2912,13 @@
         statusMsg = '';
         setRpPulse();
 
-        if (mode === 'quick' && cfg.rpQuickAutoplay && results.length) {
+        if (cfg.rpAutoplay && results.length) {
           enqueueResult(results[0], true);
         }
       }
     } catch (e) {
       if (e.message === 'aborted') statusMsg = 'Операция отменена';
-      else statusMsg = 'Ошибка ИИ: ' + (e && e.message ? e.message : 'unknown');
+      else { statusMsg = 'Ошибка ИИ: ' + (e && e.message ? e.message : 'unknown'); error('RP analysis error', e); }
     }
 
     rpBusy = false;
@@ -2650,13 +2960,14 @@
   function onChatMessage() {
     if (!cfg.rpAuto) return;
     rpMsgCounter++;
+    dbg('rp', 'msg counter', rpMsgCounter, '/', Math.max(2, cfg.rpEvery || 10));
     if (rpMsgCounter >= Math.max(2, cfg.rpEvery || 10)) {
       rpMsgCounter = 0;
       rpAutoTrigger();
     }
   }
 
-   audio.addEventListener('error', function () {
+  audio.addEventListener('error', function () {
     const t = curTrack();
     if (!t || curIdx < 0) return;
     if (!audio.src && !isYtTrack(t)) return;
@@ -2672,7 +2983,6 @@
       replaceOrSkipTrack(curIdx, t, playId, 'Ошибка аудио, ищу замену…');
     }
   });
-
 
   audio.addEventListener('ended', function () {
     if (curIdx >= 0 && queue[curIdx]) {
@@ -2694,6 +3004,201 @@
     updatePlayBtn();
   });
 
+  function exportPlaylistText(pl) {
+    if (!pl || !Array.isArray(pl.tracks)) return '';
+    const lines = pl.tracks.map(function (t) {
+      const a = String(t.artist || '').trim();
+      const ti = String(t.title || '').trim();
+      if (a && ti) return a + ' — ' + ti;
+      return ti || a;
+    }).filter(Boolean);
+    return '# ' + (pl.name || 'Playlist') + '\n' + lines.join('\n');
+  }
+
+  function exportPlaylistJson(pl) {
+    if (!pl) return '';
+    const obj = {
+      _rpPlayerExport: true,
+      type: 'playlist',
+      version: 1,
+      name: pl.name || 'Playlist',
+      tracks: (pl.tracks || []).map(function (t) {
+        return {
+          kind: t.kind || 'audio',
+          title: t.title || '',
+          artist: t.artist || '',
+          url: t.url || '',
+          ytid: t.ytid || '',
+          ytlist: t.ytlist || '',
+          source: t.source || ''
+        };
+      })
+    };
+    return JSON.stringify(obj, null, 2);
+  }
+
+  function downloadFile(filename, content, mime) {
+    try {
+      const blob = new Blob([content], { type: mime || 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        try { document.body.removeChild(a); } catch (_) {}
+        try { URL.revokeObjectURL(url); } catch (_) {}
+      }, 200);
+      dbg('export', 'downloaded', filename);
+    } catch (e) {
+      error('download fail', e);
+      statusMsg = 'Не удалось скачать файл';
+      render();
+    }
+  }
+
+  function safeFileName(s) {
+    return String(s || 'playlist').replace(/[^\p{L}\p{N}\-_ ]+/gu, '').replace(/\s+/g, '_').slice(0, 40) || 'playlist';
+  }
+
+  function doExportPlaylist(kind, fmt) {
+    let pl = null;
+    if (kind === 'm') pl = lib.manual.find(function (x) { return x.id === editId; });
+    else if (kind === 'rp') pl = lib.rp[editId];
+    else if (kind === 'fav') pl = { name: 'Избранное', tracks: lib.favorites };
+    if (!pl) return;
+
+    const base = safeFileName(pl.name);
+    if (fmt === 'json') {
+      downloadFile(base + '.json', exportPlaylistJson(pl), 'application/json;charset=utf-8');
+    } else {
+      downloadFile(base + '.txt', exportPlaylistText(pl), 'text/plain;charset=utf-8');
+    }
+    exportPop = null;
+    render();
+  }
+
+  function backupAll() {
+    const obj = {
+      _rpPlayerBackup: true,
+      version: 1,
+      ts: Date.now(),
+      cfg: cfg,
+      lib: lib,
+      radioFav: radioFav,
+      rpRejected: rpRejected,
+      queue: { queue: queue, curIdx: curIdx }
+    };
+    downloadFile('rp_player_backup_' + dateStamp().replace(/\./g, '-') + '.json', JSON.stringify(obj, null, 2), 'application/json;charset=utf-8');
+  }
+
+  function importBackup(text) {
+    let obj = null;
+    try { obj = JSON.parse(text); } catch (e) {
+      statusMsg = 'Файл бэкапа повреждён';
+      render();
+      return;
+    }
+    if (!obj || typeof obj !== 'object') {
+      statusMsg = 'Неверный формат бэкапа';
+      render();
+      return;
+    }
+
+    try {
+      if (obj._rpPlayerExport && obj.type === 'playlist') {
+        lib.manual.push({
+          id: 'm' + Date.now(),
+          name: obj.name || ('Импорт ' + dateStamp()),
+          tracks: Array.isArray(obj.tracks) ? obj.tracks : []
+        });
+        saveLib();
+        statusMsg = 'Плейлист импортирован';
+        render();
+        return;
+      }
+
+      if (obj.cfg && typeof obj.cfg === 'object') {
+        cfg = Object.assign(cfg, obj.cfg);
+        if (typeof cfg.debug === 'boolean') DEBUG = cfg.debug;
+        if (cfg.theme) theme = cfg.theme;
+        saveCfg();
+      }
+      if (obj.lib && typeof obj.lib === 'object') {
+        lib = Object.assign({ manual: [], rp: {}, favorites: [] }, obj.lib);
+        if (!Array.isArray(lib.manual)) lib.manual = [];
+        if (!lib.rp || typeof lib.rp !== 'object') lib.rp = {};
+        if (!Array.isArray(lib.favorites)) lib.favorites = [];
+        saveLib();
+      }
+      if (Array.isArray(obj.radioFav)) {
+        radioFav = obj.radioFav;
+        saveRadioFav();
+      }
+      if (obj.rpRejected && typeof obj.rpRejected === 'object') {
+        rpRejected = obj.rpRejected;
+        saveRpRejected();
+      }
+      if (obj.queue && Array.isArray(obj.queue.queue)) {
+        queue = obj.queue.queue;
+        curIdx = typeof obj.queue.curIdx === 'number' ? obj.queue.curIdx : -1;
+        saveQueue();
+      }
+
+      statusMsg = 'Бэкап импортирован';
+      info('backup imported');
+      applyBackground();
+      applyAccentVar();
+      applyTextColorVar();
+      applySolidClass();
+      render();
+    } catch (e) {
+      error('import error', e);
+      statusMsg = 'Ошибка импорта бэкапа';
+      render();
+    }
+  }
+
+  function triggerImport() {
+    try {
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = 'application/json,.json,.txt';
+      inp.style.display = 'none';
+      inp.addEventListener('change', function () {
+        const f = inp.files && inp.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = function (ev) {
+          importBackup(String(ev.target.result || ''));
+        };
+        reader.readAsText(f);
+      });
+      document.body.appendChild(inp);
+      inp.click();
+      setTimeout(function () { try { document.body.removeChild(inp); } catch (_) {} }, 1000);
+    } catch (e) {
+      error('triggerImport fail', e);
+    }
+  }
+
+  function fullReset() {
+    try {
+      currentPlayId++;
+      stopAudio();
+      stopYt();
+    } catch (_) {}
+    try {
+      ALL_LS_KEYS.forEach(function (k) { localStorage.removeItem(k); });
+    } catch (e) { warn('fullReset ls fail', e); }
+    info('full reset done, reloading widget state');
+    try {
+      window.__rpPlayerLock = false;
+      if (root && root.parentNode) root.parentNode.removeChild(root);
+    } catch (_) {}
+    try { location.reload(); } catch (_) {}
+  }
   const ICONS = {
     music: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${PFX}-ic"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
     play: `<svg viewBox="0 0 24 24" fill="currentColor" class="${PFX}-ic"><polygon points="5 3 19 12 5 21 5 3"/></svg>`,
@@ -2720,7 +3225,10 @@
     eyeOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${PFX}-ic"><path d="M17.94 17.94A10 10 0 0 1 12 20c-7 0-11-8-11-8a18 18 0 0 1 5.06-5.94M9.9 4.24A9 9 0 0 1 12 4c7 0 11 8 11 8a18 18 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`,
     sparkle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${PFX}-ic"><path d="M12 3l1.9 5.2L19 10l-5.1 1.8L12 17l-1.9-5.2L5 10l5.1-1.8z"/><path d="M19 15l.7 1.9L21.5 18l-1.8.6L19 21l-.7-2.4L16.5 18l1.8-.6z"/></svg>`,
     wand: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${PFX}-ic"><path d="M12 3l1.9 5.2L19 10l-5.1 1.8L12 17l-1.9-5.2L5 10l5.1-1.8z"/></svg>`,
-    cancelX: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" class="${PFX}-ic"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`
+    cancelX: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" class="${PFX}-ic"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+    download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${PFX}-ic"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
+    upload: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${PFX}-ic"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`,
+    trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${PFX}-ic"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`
   };
 
   function saveTheme() {
@@ -2780,11 +3288,27 @@
     applyAccentVar();
   }
 
+  function hexToRgb(hex) {
+    hex = normHex(hex).replace('#', '');
+    const n = parseInt(hex, 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+
   function applyAccentVar() {
     if (!root) return;
     const a = accentColor();
-    if (a) root.style.setProperty('--rp-accent', a);
-    else root.style.removeProperty('--rp-accent');
+    if (a) {
+      root.style.setProperty('--rp-accent', a);
+      try {
+        const rgb = hexToRgb(a);
+        root.style.setProperty('--rp-accent-soft', 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',0.24)');
+      } catch (_) {
+        root.style.setProperty('--rp-accent-soft', 'rgba(122,166,255,0.24)');
+      }
+    } else {
+      root.style.removeProperty('--rp-accent');
+      root.style.removeProperty('--rp-accent-soft');
+    }
 
     let op = null;
     if (bgPending && typeof bgPending.opacity === 'number') {
@@ -2808,7 +3332,7 @@
     return cfg.rpAuto || cfg.rpQuick;
   }
 
-   const CSS = `
+  const CSS = `
   .${PFX}-root { position: fixed; z-index: 99998; box-sizing: border-box; font-family: Arial, sans-serif; color: var(--rp-text, #f0f0f5); -webkit-user-select: none; user-select: none; touch-action: none; overflow: visible; border-radius: 16px; display: flex; flex-direction: column; }
   .${PFX}-root *, .${PFX}-root *::before, .${PFX}-root *::after { box-sizing: border-box; }
   .${PFX}-root.dragging { transition: none !important; }
@@ -2823,9 +3347,15 @@
   .${PFX}-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .${PFX}-glass { background: rgba(30,30,40,var(--rp-bg-alpha, 0.92)); backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%); border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 12px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.1); border-radius: 16px; overflow: hidden; }
 
+  .${PFX}-fab { width: 54px; height: 54px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .${PFX}-fab[data-handle] { cursor: grab; }
+  .${PFX}-fab .${PFX}-ic { width: 24px; height: 24px; pointer-events: none; }
+  .${PFX}-fab .${PFX}-spin { width: 22px; height: 22px; }
+  .${PFX}-fab.vibe { background: var(--rp-accent, rgba(120,170,255,0.32)) !important; }
+
   .${PFX}-progress-container { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
   .${PFX}-time-lbl { font-size: 10px; opacity: 0.6; min-width: 28px; text-align: center; font-family: monospace; }
-  .${PFX}-progress-slider { flex: 1; height: 4px; -webkit-appearance: none; appearance: none; background: rgba(255,255,255,0.18); border-radius: 2px; outline: none; }
+  .${PFX}-progress-slider { flex: 1; height: 4px; -webkit-appearance: none; appearance: none; background: var(--rp-accent-soft, rgba(122,166,255,0.22)); border-radius: 2px; outline: none; }
   .${PFX}-progress-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--rp-accent, #7aa6ff); cursor: pointer; border: 1px solid #fff; }
   .${PFX}-progress-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--rp-accent, #7aa6ff); border: 1px solid #fff; cursor: pointer; }
 
@@ -2909,9 +3439,9 @@
   .${PFX}-ymin-ctrls { display: flex; align-items: center; justify-content: center; gap: 12px; }
   .${PFX}-vol { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .${PFX}-vol .${PFX}-ic { width: 15px; height: 15px; opacity: .55; flex-shrink: 0; }
-  .${PFX}-vol input { flex: 1; height:4px; -webkit-appearance: none; appearance: none; background: rgba(255,255,255,0.18); border-radius: 2px; outline: none; }
-  .${PFX}-vol input::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: #fff; cursor: pointer; }
-  .${PFX}-vol input::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%; background: #fff; border: none; cursor: pointer; }
+  .${PFX}-vol input { flex: 1; height:4px; -webkit-appearance: none; appearance: none; background: var(--rp-accent-soft, rgba(122,166,255,0.22)); border-radius: 2px; outline: none; }
+  .${PFX}-vol input::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--rp-accent, #fff); cursor: pointer; }
+  .${PFX}-vol input::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%; background: var(--rp-accent, #fff); border: none; cursor: pointer; }
 
   .${PFX}-sec-h { font-size: 10px; font-weight: 700; opacity: .5; text-transform: uppercase; letter-spacing: .04em; margin: 4px 0 2px; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
   .${PFX}-sec-h-actions { display: flex; gap: 4px; }
@@ -2936,6 +3466,9 @@
   .${PFX}-row-add { opacity: .55; cursor: pointer; display: flex; flex-shrink: 0; padding: 3px; }
   .${PFX}-row-add:active { opacity: 1; }
   .${PFX}-row-add .${PFX}-ic { width: 15px; height: 15px; pointer-events: none; }
+  .${PFX}-row-fav { opacity: .55; cursor: pointer; display: flex; flex-shrink: 0; padding: 3px; }
+  .${PFX}-row-fav:active { opacity: 1; }
+  .${PFX}-row-fav .${PFX}-ic { width: 14px; height: 14px; pointer-events: none; }
   .${PFX}-rfav { opacity: .5; cursor: pointer; display: flex; flex-shrink: 0; padding: 3px; }
   .${PFX}-rfav:active { opacity: 1; }
   .${PFX}-rfav .${PFX}-ic { width: 14px; height: 14px; pointer-events: none; }
@@ -2949,6 +3482,8 @@
   .${PFX}-savebtn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 10px; font-weight: 600; padding: 8px 4px; border-radius: 8px; background: rgba(255,255,255,0.1); cursor: pointer; }
   .${PFX}-savebtn:active { background: rgba(255,255,255,0.22); }
   .${PFX}-savebtn .${PFX}-ic { width: 13px; height: 13px; pointer-events: none; }
+  .${PFX}-savebtn.danger { background: rgba(255,90,90,0.18); }
+  .${PFX}-savebtn.danger:active { background: rgba(255,90,90,0.34); }
 
   .${PFX}-pop { position: absolute; left: 8px; right: 8px; z-index: 5; background: rgba(20,20,30,0.98); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.6); padding: 10px; display: flex; flex-direction: column; gap: 5px; max-height: 260px; overflow-y: auto; }
   .${PFX}-pop-h { font-size: 11px; font-weight: 700; opacity: .7; display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
@@ -2958,6 +3493,12 @@
   .${PFX}-pop-item.flash { border-color: #3ad97f; box-shadow: 0 0 6px rgba(58,217,127,0.5); }
   .${PFX}-pop-item .${PFX}-ic { width: 14px; height: 14px; flex-shrink: 0; pointer-events: none; }
   .${PFX}-pop-new { background: var(--rp-accent, rgba(120,170,255,0.25)); font-weight: 600; }
+  .${PFX}-pop-msg { font-size: 12px; opacity: .85; padding: 4px 2px 8px; line-height: 1.4; }
+  .${PFX}-pop-btns { display: flex; gap: 6px; }
+  .${PFX}-pop-btn { flex: 1; text-align: center; font-size: 12px; font-weight: 600; padding: 8px 4px; border-radius: 8px; background: rgba(255,255,255,0.1); cursor: pointer; }
+  .${PFX}-pop-btn:active { background: rgba(255,255,255,0.24); }
+  .${PFX}-pop-btn.danger { background: rgba(255,90,90,0.25); }
+  .${PFX}-pop-btn.danger:active { background: rgba(255,90,90,0.45); }
 
   .${PFX}-drawer { border-top: 1px solid rgba(255,255,255,0.1); padding-top: 9px; display: flex; flex-direction: column; gap: 7px; }
   .${PFX}-srcrow { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -2979,6 +3520,12 @@
   .${PFX}-chip:active { background: rgba(255,255,255,0.24); }
   .${PFX}-chip.on { background: var(--rp-accent, rgba(120,170,255,0.32)); }
 
+  .${PFX}-acc { border-top: 1px solid rgba(255,255,255,0.08); }
+  .${PFX}-acc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 2px; cursor: pointer; }
+  .${PFX}-acc-head-lbl { font-size: 11px; font-weight: 700; opacity: .75; }
+  .${PFX}-acc-head .${PFX}-ic { width: 14px; height: 14px; opacity: .6; pointer-events: none; }
+  .${PFX}-acc-body { display: flex; flex-direction: column; gap: 7px; padding: 2px 0 8px; }
+
   .${PFX}-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,0.05); cursor: pointer; }
   .${PFX}-toggle-label { font-size: 12px; font-weight: 600; }
   .${PFX}-toggle-sub { font-size: 9px; opacity: .5; margin-top: 1px; }
@@ -2996,8 +3543,8 @@
   .${PFX}-quickbtn:active { opacity: .8; }
   .${PFX}-quickbtn .${PFX}-ic { width: 15px; height: 15px; }
 
-  .${PFX}-colorpop { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 10px; background: rgba(0,0,0,0.28); margin-top: 4px; max-height: min(58vh, 420px); overflow-y: auto; min-height: 0; flex-shrink: 1; }
-  .${PFX}-colorpop-h { font-size: 10px; font-weight: 700; opacity: .6; text-transform: uppercase; letter-spacing: .04em; }
+  .${PFX}-colorpop { display: flex; flex-direction: column; gap: 4px; padding: 10px; border-radius: 10px; background: rgba(0,0,0,0.28); margin-top: 4px; max-height: min(58vh, 420px); overflow-y: auto; min-height: 0; flex-shrink: 1; }
+  .${PFX}-colorpop-h { font-size: 10px; font-weight: 700; opacity: .6; text-transform: uppercase; letter-spacing: .04em; margin: 4px 0 2px; }
   .${PFX}-colorrow { display: flex; gap: 6px; align-items: center; }
   .${PFX}-colorrow input[type="color"] { width: 34px; height: 34px; padding: 0; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: transparent; cursor: pointer; flex-shrink: 0; }
   .${PFX}-swatches { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -3043,12 +3590,22 @@
   .${PFX}-root.${PFX}-solid-light .${PFX}-head-btn, .${PFX}-root.${PFX}-solid-light .${PFX}-cbtn, .${PFX}-root.${PFX}-solid-light .${PFX}-note-btn, .${PFX}-root.${PFX}-solid-light .${PFX}-theme-btn, .${PFX}-root.${PFX}-solid-light .${PFX}-pill-icon, .${PFX}-root.${PFX}-solid-light .${PFX}-pill-theme, .${PFX}-root.${PFX}-solid-light .${PFX}-search-btn { background: rgba(255,255,255,0.55) !important; }
   .${PFX}-root.${PFX}-solid-light .${PFX}-search input, .${PFX}-root.${PFX}-solid-light .${PFX}-finput, .${PFX}-root.${PFX}-solid-light .${PFX}-numbox input, .${PFX}-root.${PFX}-solid-light .${PFX}-profsel, .${PFX}-root.${PFX}-solid-light .${PFX}-keybox { background: rgba(255,255,255,0.6) !important; }
 
+  .${PFX}-root.${PFX}-solid .${PFX}-row.active, .${PFX}-root.${PFX}-solid-light .${PFX}-row.active,
+  .${PFX}-root.${PFX}-solid .${PFX}-srcbtn.on, .${PFX}-root.${PFX}-solid-light .${PFX}-srcbtn.on,
+  .${PFX}-root.${PFX}-solid .${PFX}-tab.on, .${PFX}-root.${PFX}-solid-light .${PFX}-tab.on,
+  .${PFX}-root.${PFX}-solid .${PFX}-chip.on, .${PFX}-root.${PFX}-solid-light .${PFX}-chip.on,
+  .${PFX}-root.${PFX}-solid .${PFX}-head-btn.on, .${PFX}-root.${PFX}-solid-light .${PFX}-head-btn.on,
+  .${PFX}-root.${PFX}-solid .${PFX}-sw-track.on, .${PFX}-root.${PFX}-solid-light .${PFX}-sw-track.on,
+  .${PFX}-root.${PFX}-solid .${PFX}-quickbtn, .${PFX}-root.${PFX}-solid-light .${PFX}-quickbtn,
+  .${PFX}-root.${PFX}-solid .${PFX}-pop-new, .${PFX}-root.${PFX}-solid-light .${PFX}-pop-new,
+  .${PFX}-root.${PFX}-solid .${PFX}-pill-vibe, .${PFX}-root.${PFX}-solid-light .${PFX}-pill-vibe,
+  .${PFX}-root.${PFX}-solid .${PFX}-fab.vibe, .${PFX}-root.${PFX}-solid-light .${PFX}-fab.vibe { background: var(--rp-accent, rgba(120,170,255,0.7)) !important; }
+
   .${PFX}-bgrow { display: flex; gap: 8px; align-items: center; }
   .${PFX}-bgfile-label { flex: 1; display: inline-block; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 7px 9px; font-size: 11px; cursor: pointer; text-align: center; color: #ccc; }
   .${PFX}-bgfile-input { display: none; }
   .${PFX}-bgfile-name { font-size: 10px; opacity: 0.7; margin-top: 2px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   `;
-
   let root, shell, ytLayer, bodyEl;
   let searchTab = 'all';
   let colorPopOpen = false;
@@ -3116,7 +3673,7 @@
     return 'Имя (топ) или Имя — Трек';
   }
 
-    function syncYtLayer() {
+  function syncYtLayer() {
     if (!ytLayer) return;
     const t = curTrack();
     const yt = isYtTrack(t);
@@ -3164,7 +3721,7 @@
     if (eye) eye.innerHTML = ytHidden ? ICONS.eyeOff : ICONS.eye;
   }
 
-   function closeYt() {
+  function closeYt() {
     currentPlayId++;
     ytCurrentEmbed = null;
 
@@ -3179,6 +3736,19 @@
     render();
   }
 
+  function fabHTML() {
+    const cur = curTrack();
+    const playingSomething = (curIdx >= 0) || !!window.__rpRadioNow;
+    const showVibe = rpEnabled() && cfg.rpQuick && !playingSomething;
+    let inner;
+    if (showVibe) {
+      inner = rpBusy ? '<span class="' + PFX + '-spin"></span>' : ICONS.wand;
+    } else {
+      inner = isPlaying ? ICONS.pause : ICONS.play;
+    }
+    return '<div class="' + PFX + '-glass ' + PFX + '-fab' + (showVibe ? ' vibe' : '') + '" data-handle data-fabbtn' +
+      (showVibe ? ' data-fabvibe="1"' : '') + '>' + inner + '</div>';
+  }
 
   function pillHTML() {
     const cur = curTrack();
@@ -3189,7 +3759,7 @@
       '<div class="' + PFX + '-pill-controls">';
     if (rpEnabled()) h += '<div class="' + PFX + '-pill-vibe" data-quickvibe>' + (rpBusy ? '<span class="' + PFX + '-spin"></span>' : ICONS.wand) + '</div>';
     h += '<div class="' + PFX + '-pill-theme" data-themebtn>' + ICONS.palette + '</div>';
-    h += '<div class="' + PFX + '-pill-icon" data-play>' + (isPlaying ? ICONS.pause : ICONS.play) + '</div>';
+    h += '<div class="' + PFX + '-pill-icon" data-play data-fabsource>' + (isPlaying ? ICONS.pause : ICONS.play) + '</div>';
     h += '</div></div>';
     return h;
   }
@@ -3205,11 +3775,16 @@
         '</div>' +
         '<div class="' + PFX + '-ymin-actions">' +
           vibeBtn +
-          '<div class="' + PFX + '-note-btn" data-play>' + (isPlaying ? ICONS.pause : ICONS.play) + '</div>' +
+          '<div class="' + PFX + '-note-btn" data-play data-fabsource>' + (isPlaying ? ICONS.pause : ICONS.play) + '</div>' +
           '<div class="' + PFX + '-head-btn" data-themebtn>' + ICONS.palette + '</div>' +
         '</div>' +
       '</div>' +
     '</div>';
+  }
+
+  function favBtnHTML(t, attr) {
+    const on = isFav(t);
+    return '<span class="' + PFX + '-row-fav" ' + attr + '>' + (on ? ICONS.heartFill : ICONS.heart) + '</span>';
   }
 
   function resultsHTML() {
@@ -3224,6 +3799,7 @@
       h += '<div class="' + PFX + '-row' + (t.why ? ' rprow' : '') + '" data-resplay="' + i + '">' +
         '<div class="' + PFX + '-row-meta"><div class="' + PFX + '-row-t">' + esc(t.title) + '</div><div class="' + PFX + '-row-a">' + esc(t.artist) + '</div></div>' +
         (t.source ? '<span class="' + PFX + '-row-src">' + esc(t.source) + '</span>' : '') +
+        favBtnHTML(t, 'data-resfav="' + i + '"') +
         '<span class="' + PFX + '-row-add" data-resadd="' + i + '">' + ICONS.plus + '</span>' +
         (t.why ? '<div class="' + PFX + '-row-why">🎵 ' + esc(t.why) + '</div>' : '') +
       '</div>';
@@ -3291,8 +3867,38 @@
     return h;
   }
 
+  function trackRowEdit(t, i) {
+    return '<div class="' + PFX + '-row" data-pltrack="' + i + '">' +
+      '<span class="' + PFX + '-row-num">' + (i + 1) + '</span>' +
+      '<div class="' + PFX + '-row-meta"><div class="' + PFX + '-row-t">' + esc(t.title) + '</div><div class="' + PFX + '-row-a">' + esc(t.artist) + '</div></div>' +
+      (t.source ? '<span class="' + PFX + '-row-src">' + esc(t.source) + '</span>' : '') +
+      favBtnHTML(t, 'data-plfav="' + i + '"') +
+      '<span class="' + PFX + '-row-act" data-trkdel="' + i + '">' + ICONS.close + '</span>' +
+    '</div>';
+  }
+
   function libHTML() {
     let h = '<div class="' + PFX + '-sec" data-scrollsec="lib">';
+
+    if (editKind === 'fav') {
+      h += '<div class="' + PFX + '-sec-h"><span>Избранное · ред.</span>' +
+        '<span class="' + PFX + '-sec-h-actions">' +
+          '<span class="' + PFX + '-sec-h-btn" data-exportopen="fav" title="Экспорт">' + ICONS.download + '</span>' +
+        '</span></div>';
+      if (!lib.favorites.length) h += '<div class="' + PFX + '-empty">Пусто</div>';
+      else lib.favorites.forEach(function (t, i) {
+        h += '<div class="' + PFX + '-row" data-favtrack="' + i + '">' +
+          '<span class="' + PFX + '-row-num">' + (i + 1) + '</span>' +
+          '<div class="' + PFX + '-row-meta"><div class="' + PFX + '-row-t">' + esc(t.title) + '</div><div class="' + PFX + '-row-a">' + esc(t.artist) + '</div></div>' +
+          (t.source ? '<span class="' + PFX + '-row-src">' + esc(t.source) + '</span>' : '') +
+          '<span class="' + PFX + '-row-act" data-favdel="' + i + '">' + ICONS.close + '</span>' +
+        '</div>';
+      });
+      h += '<div class="' + PFX + '-savebar"><div class="' + PFX + '-savebtn" data-editback>' + ICONS.chevron + '<span>Назад</span></div></div>';
+      h += '</div>';
+      return h;
+    }
+
     if (editId !== null) {
       let pl = null;
       if (editKind === 'm') pl = lib.manual.find(function (x) { return x.id === editId; });
@@ -3301,20 +3907,35 @@
         editId = null;
         editKind = null;
       } else {
-        h += '<div class="' + PFX + '-sec-h">' + esc(pl.name) + ' · ред.</div>';
+        h += '<div class="' + PFX + '-sec-h"><span>' + esc(pl.name) + ' · ред.</span>' +
+          '<span class="' + PFX + '-sec-h-actions">' +
+            '<span class="' + PFX + '-sec-h-btn" data-exportopen="' + editKind + '" title="Экспорт">' + ICONS.download + '</span>' +
+          '</span></div>';
+        if (exportPop) {
+          h += '<div class="' + PFX + '-colorbtns" style="margin:2px 0 6px;">' +
+            '<div class="' + PFX + '-cbtn2" data-exportdo="text">Текст (.txt)</div>' +
+            '<div class="' + PFX + '-cbtn2" data-exportdo="json">JSON (.json)</div>' +
+            '<div class="' + PFX + '-cbtn2" data-exportcancel>Отмена</div>' +
+          '</div>';
+        }
         if (!pl.tracks || !pl.tracks.length) h += '<div class="' + PFX + '-empty">Пусто</div>';
         else pl.tracks.forEach(function (t, i) {
-          h += '<div class="' + PFX + '-row" data-pltrack="' + i + '">' +
-            '<span class="' + PFX + '-row-num">' + (i + 1) + '</span>' +
-            '<div class="' + PFX + '-row-meta"><div class="' + PFX + '-row-t">' + esc(t.title) + '</div><div class="' + PFX + '-row-a">' + esc(t.artist) + '</div></div>' +
-            (t.source ? '<span class="' + PFX + '-row-src">' + esc(t.source) + '</span>' : '') +
-            '<span class="' + PFX + '-row-act" data-trkdel="' + i + '">' + ICONS.close + '</span>' +
-          '</div>';
+          h += trackRowEdit(t, i);
         });
         h += '<div class="' + PFX + '-savebar"><div class="' + PFX + '-savebtn" data-editback>' + ICONS.chevron + '<span>Назад</span></div></div>';
         h += '</div>';
         return h;
       }
+    }
+
+    h += '<div class="' + PFX + '-sec-h">Избранное</div>';
+    if (!lib.favorites.length) h += '<div class="' + PFX + '-empty">Лайкните трек ♥, чтобы создать</div>';
+    else {
+      h += '<div class="' + PFX + '-row" data-loadfav="1">' +
+        '<div class="' + PFX + '-row-meta"><div class="' + PFX + '-row-t">' + ICONS.heartFill + ' Избранное</div><div class="' + PFX + '-row-a">' + lib.favorites.length + ' треков</div></div>' +
+        '<span class="' + PFX + '-row-act" data-editfav="1">' + ICONS.list + '</span>' +
+        '<span class="' + PFX + '-row-act" data-delfav="1">' + ICONS.close + '</span>' +
+      '</div>';
     }
 
     h += '<div class="' + PFX + '-sec-h">Ручные плейлисты</div>';
@@ -3326,6 +3947,12 @@
         '<span class="' + PFX + '-row-act" data-editm="' + p.id + '">' + ICONS.list + '</span>' +
         '<span class="' + PFX + '-row-act" data-delm="' + p.id + '">' + ICONS.close + '</span>' +
       '</div>';
+      if (confirmDelete && confirmDelete.kind === 'm' && confirmDelete.id === p.id) {
+        h += '<div class="' + PFX + '-pop-btns" style="margin:2px 0 6px;">' +
+          '<div class="' + PFX + '-pop-btn danger" data-confirmdel>Удалить</div>' +
+          '<div class="' + PFX + '-pop-btn" data-confirmcancel>Отмена</div>' +
+        '</div>';
+      }
     });
 
     h += '<div class="' + PFX + '-sec-h">Плейлисты РП (по чатам)</div>';
@@ -3339,6 +3966,12 @@
         '<span class="' + PFX + '-row-act" data-editrp="' + esc(cid) + '">' + ICONS.list + '</span>' +
         '<span class="' + PFX + '-row-act" data-delrp="' + esc(cid) + '">' + ICONS.close + '</span>' +
       '</div>';
+      if (confirmDelete && confirmDelete.kind === 'rp' && confirmDelete.id === cid) {
+        h += '<div class="' + PFX + '-pop-btns" style="margin:2px 0 6px;">' +
+          '<div class="' + PFX + '-pop-btn danger" data-confirmdel>Удалить</div>' +
+          '<div class="' + PFX + '-pop-btn" data-confirmcancel>Отмена</div>' +
+        '</div>';
+      }
     });
     h += '</div>';
     return h;
@@ -3364,6 +3997,7 @@
         '<span class="' + PFX + '-row-num">' + (i + 1) + '</span>' +
         '<div class="' + PFX + '-row-meta"><div class="' + PFX + '-row-t' + (act ? ' ' + PFX + '-marq' : '') + '">' + (act ? '<span class="' + PFX + '-marq-inner">' + esc(t.title) + '</span>' : esc(t.title)) + '</div><div class="' + PFX + '-row-a">' + esc(t.artist) + '</div></div>' +
         (t.source ? '<span class="' + PFX + '-row-src">' + esc(t.source) + '</span>' : '') +
+        favBtnHTML(t, 'data-qfav="' + i + '"') +
         '<span class="' + PFX + '-row-add" data-qadd="' + i + '">' + ICONS.plus + '</span>' +
         '<span class="' + PFX + '-row-act" data-pledit="' + i + '">' + ICONS.edit + '</span>' +
         '<span class="' + PFX + '-row-act" data-pldel="' + i + '">' + ICONS.close + '</span>' +
@@ -3430,7 +4064,6 @@
   function rpHTML() {
     let h = '<div class="' + PFX + '-drawer">';
     h += '<div class="' + PFX + '-toggle" data-rptoggle="rpAuto"><div><div class="' + PFX + '-toggle-label">Авто-режим</div><div class="' + PFX + '-toggle-sub">подбор каждые N сообщений</div></div><div class="' + PFX + '-sw-track ' + (cfg.rpAuto ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>';
-    h += '<div class="' + PFX + '-toggle" data-rptoggle="rpQuick"><div><div class="' + PFX + '-toggle-label">Быстрый режим</div><div class="' + PFX + '-toggle-sub">кнопка «Вайб сцены» появится во вкладке «Поиск»</div></div><div class="' + PFX + '-sw-track ' + (cfg.rpQuick ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>';
 
     if (cfg.rpAuto) {
       h += '<div class="' + PFX + '-numrow">' +
@@ -3439,8 +4072,11 @@
       '</div>';
     }
 
+    h += '<div class="' + PFX + '-toggle" data-rptoggle="rpQuick"><div><div class="' + PFX + '-toggle-label">Быстрый режим</div><div class="' + PFX + '-toggle-sub">кнопка «Вайб сцены» во вкладке «Поиск» и в свёрнутом виде</div></div><div class="' + PFX + '-sw-track ' + (cfg.rpQuick ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>';
+
+    h += '<div class="' + PFX + '-toggle" data-rptoggle="rpAutoplay"><div><div class="' + PFX + '-toggle-label">Авто-воспроизведение</div><div class="' + PFX + '-toggle-sub">сразу включать найденный трек (оба режима). Выкл — только пульсация</div></div><div class="' + PFX + '-sw-track ' + (cfg.rpAutoplay ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>';
+
     if (cfg.rpQuick) {
-      h += '<div class="' + PFX + '-toggle" data-rptoggle="rpQuickAutoplay"><div><div class="' + PFX + '-toggle-label">Авто-играть (быстрый)</div><div class="' + PFX + '-toggle-sub">сразу включать найденный трек</div></div><div class="' + PFX + '-sw-track ' + (cfg.rpQuickAutoplay ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>';
       h += '<div class="' + PFX + '-quickbtn" data-quickvibe>' + (rpBusy ? '<span class="' + PFX + '-spin"></span>' : ICONS.wand) + 'Вайб сцены</div>';
       if (rpBusy) h += '<div class="' + PFX + '-savebtn" data-cancel-rp style="margin-top:6px;">' + ICONS.cancelX + '<span>Отменить</span></div>';
     }
@@ -3448,17 +4084,48 @@
     h += '<div class="' + PFX + '-flabel">Профиль подключения</div>';
     h += '<div class="' + PFX + '-profsel" data-profsel><span>' + esc(profileName(cfg.rpProfile)) + '</span>' + ICONS.chevron + '</div>';
 
-    h += '<div class="' + PFX + '-flabel">Язык музыки</div>';
-    h += '<div class="' + PFX + '-chips">';
-    RP_LANGS.forEach(function (l) {
-      h += '<div class="' + PFX + '-chip ' + (cfg.rpLang === l.id ? 'on' : '') + '" data-rplang="' + l.id + '">' + l.label + '</div>';
-    });
-    h += '<div class="' + PFX + '-chip ' + (cfg.rpLang === 'custom' ? 'on' : '') + '" data-rplang="custom">+ свой</div>';
+    h += '<div class="' + PFX + '-acc"><div class="' + PFX + '-acc-head" data-rpacc="source"><span class="' + PFX + '-acc-head-lbl">Источник подбора</span>' + (rpAccSource ? ICONS.chevronUp : ICONS.chevron) + '</div>';
+    if (rpAccSource) {
+      h += '<div class="' + PFX + '-acc-body"><div class="' + PFX + '-srcrow">' +
+        '<div class="' + PFX + '-srcbtn ' + (cfg.rpSource === 'auto' ? 'on' : '') + '" data-rpsrc="auto">Авто (все)</div>' +
+        '<div class="' + PFX + '-srcbtn ' + (cfg.rpSource === 'youtube' ? 'on' : '') + '" data-rpsrc="youtube">Только YouTube</div>' +
+        '<div class="' + PFX + '-srcbtn ' + (cfg.rpSource === 'jamendo' ? 'on' : '') + '" data-rpsrc="jamendo">Только Jamendo</div>' +
+        '<div class="' + PFX + '-srcbtn ' + (cfg.rpSource === 'baibai' ? 'on' : '') + '" data-rpsrc="baibai">Только baibai</div>' +
+      '</div></div>';
+    }
     h += '</div>';
 
-    if (cfg.rpLang === 'custom') {
-      h += '<input class="' + PFX + '-finput" data-cfg="rpLangCustom" placeholder="напр. Korean, Spanish..." value="' + esc(cfg.rpLangCustom) + '">';
+    h += '<div class="' + PFX + '-acc"><div class="' + PFX + '-acc-head" data-rpacc="lang"><span class="' + PFX + '-acc-head-lbl">Язык музыки</span>' + (rpAccLang ? ICONS.chevronUp : ICONS.chevron) + '</div>';
+    if (rpAccLang) {
+      h += '<div class="' + PFX + '-acc-body"><div class="' + PFX + '-chips">';
+      RP_LANGS.forEach(function (l) {
+        h += '<div class="' + PFX + '-chip ' + (cfg.rpLang === l.id ? 'on' : '') + '" data-rplang="' + l.id + '">' + l.label + '</div>';
+      });
+      h += '<div class="' + PFX + '-chip ' + (cfg.rpLang === 'custom' ? 'on' : '') + '" data-rplang="custom">+ свой</div>';
+      h += '</div>';
+      if (cfg.rpLang === 'custom') {
+        h += '<input class="' + PFX + '-finput" data-cfg="rpLangCustom" placeholder="напр. Korean, Spanish..." value="' + esc(cfg.rpLangCustom) + '">';
+      }
+      h += '</div>';
     }
+    h += '</div>';
+
+    h += '<div class="' + PFX + '-acc"><div class="' + PFX + '-acc-head" data-rpacc="genre"><span class="' + PFX + '-acc-head-lbl">Жанр музыки</span>' + (rpAccGenre ? ICONS.chevronUp : ICONS.chevron) + '</div>';
+    if (rpAccGenre) {
+      h += '<div class="' + PFX + '-acc-body"><div class="' + PFX + '-chips">';
+      RP_GENRES.forEach(function (g) {
+        h += '<div class="' + PFX + '-chip ' + (cfg.rpGenre === g.id ? 'on' : '') + '" data-rpgenre="' + g.id + '">' + g.label + '</div>';
+      });
+      h += '<div class="' + PFX + '-chip ' + (cfg.rpGenre === 'custom' ? 'on' : '') + '" data-rpgenre="custom">+ свой</div>';
+      h += '</div>';
+      if (cfg.rpGenre === 'custom') {
+        h += '<input class="' + PFX + '-finput" data-cfg="rpGenreCustom" placeholder="напр. shoegaze, drum and bass..." value="' + esc(cfg.rpGenreCustom) + '">';
+      }
+      h += '</div>';
+    }
+    h += '</div>';
+
+    h += '<div class="' + PFX + '-toggle" data-rptoggle="rpUseFavorites"><div><div class="' + PFX + '-toggle-label">Учитывать вкусы (лайки)</div><div class="' + PFX + '-toggle-sub">отправлять избранное ИИ для понимания вкусов</div></div><div class="' + PFX + '-sw-track ' + (cfg.rpUseFavorites ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>';
 
     h += '<div class="' + PFX + '-toggle" data-rptoggle="rpTokenLimitOn"><div><div class="' + PFX + '-toggle-label">Лимит контекста</div><div class="' + PFX + '-toggle-sub">ограничить объём сканирования</div></div><div class="' + PFX + '-sw-track ' + (cfg.rpTokenLimitOn ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>';
 
@@ -3466,10 +4133,25 @@
       h += '<div class="' + PFX + '-numbox"><div class="' + PFX + '-flabel">Лимит токенов (≈)</div><input type="number" min="1000" step="1000" data-rpnum="rpTokenLimit" value="' + (cfg.rpTokenLimit || 6000) + '"></div>';
     }
 
+    h += '<div class="' + PFX + '-toggle" data-rptoggle="debug"><div><div class="' + PFX + '-toggle-label">Подробные логи</div><div class="' + PFX + '-toggle-sub">вывод в консоль (termux/powershell)</div></div><div class="' + PFX + '-sw-track ' + (cfg.debug ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>';
+
+    h += '<div class="' + PFX + '-colorpop-h">Данные виджета</div>';
+    h += '<div class="' + PFX + '-savebar">' +
+      '<div class="' + PFX + '-savebtn" data-importbackup>' + ICONS.upload + '<span>Импорт</span></div>' +
+      '<div class="' + PFX + '-savebtn" data-backup>' + ICONS.download + '<span>Бэкап</span></div>' +
+      '<div class="' + PFX + '-savebtn danger" data-fullreset>' + ICONS.trash + '<span>Сброс</span></div>' +
+    '</div>';
+    if (confirmDelete && confirmDelete.kind === 'reset') {
+      h += '<div class="' + PFX + '-pop-msg">Полностью очистить всю память и настройки виджета? Виджет перезагрузится.</div>' +
+        '<div class="' + PFX + '-pop-btns">' +
+          '<div class="' + PFX + '-pop-btn danger" data-confirmdel>Сбросить всё</div>' +
+          '<div class="' + PFX + '-pop-btn" data-confirmcancel>Отмена</div>' +
+        '</div>';
+    }
+
     h += '</div>';
     return h;
   }
-
   function colorPopHTML() {
     const cur = accentColor() || '#7aa6ff';
     const curTxt = currentTextColor() || '#ffffff';
@@ -3498,68 +4180,87 @@
     const bgUrlVal = (bgPending && bgPending.url) || (curBg && curBg.url) || '';
     const bgName = bgPending ? (bgPending.base64 ? 'Файл выбран' : (bgPending.url ? 'URL: ' + esc(bgPending.url) : '')) : (curBg && curBg.base64 ? 'Текущий файл темы' : (curBg && curBg.url ? 'URL: ' + esc(curBg.url) : ''));
 
-    return '<div class="' + PFX + '-colorpop" data-scrollsec="colorpop">' +
-      '<div class="' + PFX + '-colorpop-h">Акцентный цвет</div>' +
-      '<div class="' + PFX + '-colorrow">' +
-        '<input type="color" data-colorpick value="' + cur + '">' +
-        '<input class="' + PFX + '-finput" data-colorhex placeholder="#RRGGBB" value="' + esc(accentColor()) + '">' +
-      '</div>' +
-      '<div class="' + PFX + '-swatches">' + sw + '</div>' +
-      '<div class="' + PFX + '-colorbtns">' +
-        '<div class="' + PFX + '-cbtn2" data-accentapplytheme>Акцент: эта тема</div>' +
-        '<div class="' + PFX + '-cbtn2" data-accentapplyall>Акцент: все темы</div>' +
-        '<div class="' + PFX + '-cbtn2" data-accentdel>Сброс</div>' +
-      '</div>' +
+    let h = '<div class="' + PFX + '-colorpop" data-scrollsec="colorpop">';
 
-      '<div class="' + PFX + '-colorpop-h">Цвет текста</div>' +
-      '<div class="' + PFX + '-colorrow">' +
-        '<input type="color" data-textpick value="' + curTxt + '">' +
-        '<input class="' + PFX + '-finput" data-texthex placeholder="#RRGGBB" value="' + esc(currentTextColor()) + '">' +
-      '</div>' +
-      '<div class="' + PFX + '-swatches">' + tsw + '</div>' +
-      '<div class="' + PFX + '-colorbtns">' +
-        '<div class="' + PFX + '-cbtn2" data-textapplytheme>Текст: эта тема</div>' +
-        '<div class="' + PFX + '-cbtn2" data-textapplyall>Текст: все темы</div>' +
-        '<div class="' + PFX + '-cbtn2" data-textdel>Сброс текста</div>' +
-      '</div>' +
+    h += '<div class="' + PFX + '-acc"><div class="' + PFX + '-acc-head" data-acc="accent"><span class="' + PFX + '-acc-head-lbl">Акцентный цвет</span>' + (accAccent ? ICONS.chevronUp : ICONS.chevron) + '</div>';
+    if (accAccent) {
+      h += '<div class="' + PFX + '-acc-body">' +
+        '<div class="' + PFX + '-colorrow">' +
+          '<input type="color" data-colorpick value="' + cur + '">' +
+          '<input class="' + PFX + '-finput" data-colorhex placeholder="#RRGGBB" value="' + esc(accentColor()) + '">' +
+        '</div>' +
+        '<div class="' + PFX + '-swatches">' + sw + '</div>' +
+        '<div class="' + PFX + '-colorbtns">' +
+          '<div class="' + PFX + '-cbtn2" data-accentapplytheme>Эта тема</div>' +
+          '<div class="' + PFX + '-cbtn2" data-accentapplyall>Все темы</div>' +
+          '<div class="' + PFX + '-cbtn2" data-accentdel>Сброс</div>' +
+        '</div></div>';
+    }
+    h += '</div>';
 
-      '<div class="' + PFX + '-colorpop-h">Подложки под текст</div>' +
-      '<div class="' + PFX + '-solidtoggle" data-solidtoggle><div class="' + PFX + '-solidtoggle-lbl">Тёмная подложка</div><div class="' + PFX + '-sw-track ' + (solidOn ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>' +
-      '<div class="' + PFX + '-solidtoggle" data-solidlighttoggle><div class="' + PFX + '-solidtoggle-lbl">Светлая подложка</div><div class="' + PFX + '-sw-track ' + (solidLightOn ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>' +
-      '<div class="' + PFX + '-colorbtns">' +
-        '<div class="' + PFX + '-cbtn2" data-soliddarkall>Тёмные: все</div>' +
-        '<div class="' + PFX + '-cbtn2" data-solidlightall>Светлые: все</div>' +
-        '<div class="' + PFX + '-cbtn2" data-solidnoneall>Снять со всех</div>' +
-      '</div>' +
+    h += '<div class="' + PFX + '-acc"><div class="' + PFX + '-acc-head" data-acc="text"><span class="' + PFX + '-acc-head-lbl">Цвет текста</span>' + (accText ? ICONS.chevronUp : ICONS.chevron) + '</div>';
+    if (accText) {
+      h += '<div class="' + PFX + '-acc-body">' +
+        '<div class="' + PFX + '-colorrow">' +
+          '<input type="color" data-textpick value="' + curTxt + '">' +
+          '<input class="' + PFX + '-finput" data-texthex placeholder="#RRGGBB" value="' + esc(currentTextColor()) + '">' +
+        '</div>' +
+        '<div class="' + PFX + '-swatches">' + tsw + '</div>' +
+        '<div class="' + PFX + '-colorbtns">' +
+          '<div class="' + PFX + '-cbtn2" data-textapplytheme>Эта тема</div>' +
+          '<div class="' + PFX + '-cbtn2" data-textapplyall>Все темы</div>' +
+          '<div class="' + PFX + '-cbtn2" data-textdel>Сброс</div>' +
+        '</div></div>';
+    }
+    h += '</div>';
 
-      '<div class="' + PFX + '-colorpop-h">Прозрачность фона</div>' +
+    h += '<div class="' + PFX + '-acc"><div class="' + PFX + '-acc-head" data-acc="solid"><span class="' + PFX + '-acc-head-lbl">Подложки под текст</span>' + (accSolid ? ICONS.chevronUp : ICONS.chevron) + '</div>';
+    if (accSolid) {
+      h += '<div class="' + PFX + '-acc-body">' +
+        '<div class="' + PFX + '-solidtoggle" data-solidtoggle><div class="' + PFX + '-solidtoggle-lbl">Тёмная подложка</div><div class="' + PFX + '-sw-track ' + (solidOn ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>' +
+        '<div class="' + PFX + '-solidtoggle" data-solidlighttoggle><div class="' + PFX + '-solidtoggle-lbl">Светлая подложка</div><div class="' + PFX + '-sw-track ' + (solidLightOn ? 'on' : '') + '"><div class="' + PFX + '-sw-knob"></div></div></div>' +
+        '<div class="' + PFX + '-colorbtns">' +
+          '<div class="' + PFX + '-cbtn2" data-soliddarkall>Тёмные: все</div>' +
+          '<div class="' + PFX + '-cbtn2" data-solidlightall>Светлые: все</div>' +
+          '<div class="' + PFX + '-cbtn2" data-solidnoneall>Снять</div>' +
+        '</div></div>';
+    }
+    h += '</div>';
+
+    h += '<div class="' + PFX + '-colorpop-h">Прозрачность фона</div>' +
       '<div class="' + PFX + '-oprow">' + ICONS.palette + '<input type="range" min="0" max="100" value="' + opv + '" data-opacity><span class="' + PFX + '-opval">' + opv + '%</span></div>' +
       '<div class="' + PFX + '-colorbtns">' +
         '<div class="' + PFX + '-cbtn2" data-opapplytheme>Прозр: эта тема</div>' +
         '<div class="' + PFX + '-cbtn2" data-opapplyall>Прозр: все темы</div>' +
-      '</div>' +
+      '</div>';
 
-      '<div class="' + PFX + '-colorpop-h">Фон виджета</div>' +
-      '<div class="' + PFX + '-bgrow">' +
-        '<input class="' + PFX + '-finput" placeholder="URL изображения" data-bg-url value="' + esc(bgUrlVal) + '">' +
-        '<label class="' + PFX + '-bgfile-label">Выбрать файл<input type="file" accept="image/*" data-bg-file class="' + PFX + '-bgfile-input"></label>' +
-      '</div>' +
-      '<div class="' + PFX + '-bgfile-name" data-bgfile-name>' + bgName + '</div>' +
-      '<div class="' + PFX + '-colorbtns">' +
-        '<div class="' + PFX + '-cbtn2" data-bgapplytheme>Фон: эта тема</div>' +
-        '<div class="' + PFX + '-cbtn2" data-bgapplyall>Фон: все темы</div>' +
-      '</div>' +
-      '<div class="' + PFX + '-colorbtns">' +
-        '<div class="' + PFX + '-cbtn2" data-bgdeltheme>Удалить фон (тема)</div>' +
-        '<div class="' + PFX + '-cbtn2" data-bgdelall>Удалить фон (все)</div>' +
-      '</div>' +
+    h += '<div class="' + PFX + '-acc"><div class="' + PFX + '-acc-head" data-acc="bg"><span class="' + PFX + '-acc-head-lbl">Фон виджета</span>' + (accBg ? ICONS.chevronUp : ICONS.chevron) + '</div>';
+    if (accBg) {
+      h += '<div class="' + PFX + '-acc-body">' +
+        '<div class="' + PFX + '-bgrow">' +
+          '<input class="' + PFX + '-finput" placeholder="URL изображения" data-bg-url value="' + esc(bgUrlVal) + '">' +
+          '<label class="' + PFX + '-bgfile-label">Файл<input type="file" accept="image/*" data-bg-file class="' + PFX + '-bgfile-input"></label>' +
+        '</div>' +
+        '<div class="' + PFX + '-bgfile-name" data-bgfile-name>' + bgName + '</div>' +
+        '<div class="' + PFX + '-colorbtns">' +
+          '<div class="' + PFX + '-cbtn2" data-bgapplytheme>Фон: эта тема</div>' +
+          '<div class="' + PFX + '-cbtn2" data-bgapplyall>Фон: все темы</div>' +
+        '</div>' +
+        '<div class="' + PFX + '-colorbtns">' +
+          '<div class="' + PFX + '-cbtn2" data-bgdeltheme>Удалить (тема)</div>' +
+          '<div class="' + PFX + '-cbtn2" data-bgdelall>Удалить (все)</div>' +
+        '</div></div>';
+    }
+    h += '</div>';
 
-            '<div class="' + PFX + '-colorbtns">' +
+    h += '<div class="' + PFX + '-colorbtns">' +
         '<div class="' + PFX + '-cbtn2" data-sizereset>Размер сброс</div>' +
         '<div class="' + PFX + '-cbtn2" data-colorreset>Сброс</div>' +
         '<div class="' + PFX + '-cbtn2" data-colorclose>Готово</div>' +
-      '</div>' +
-    '</div>';
+      '</div>';
+
+    h += '</div>';
+    return h;
   }
 
   function plPopHTML() {
@@ -3617,10 +4318,16 @@
       '</div>';
     }
 
+    let favCur = '';
+    if (cur && !radioNow) {
+      favCur = '<div class="' + PFX + '-theme-btn" data-favcur title="В избранное">' + (isFav(cur) ? ICONS.heartFill : ICONS.heart) + '</div>';
+    }
+
     return '<div class="' + PFX + '-glass ' + PFX + '-panel">' +
       '<div class="' + PFX + '-head">' +
         '<div class="' + PFX + '-note-btn" data-handle data-notebtn title="Свернуть">' + ICONS.music + '</div>' +
         '<div class="' + PFX + '-theme-btn" data-themebtn>' + ICONS.palette + '</div>' +
+        favCur +
         '<div class="' + PFX + '-head-grab" data-handle></div>' +
         '<div class="' + PFX + '-head-btn ' + (searchOpen ? 'on' : '') + '" data-searchtab>' + ICONS.search + '</div>' +
         '<div class="' + PFX + '-head-btn ' + (radioOpen ? 'on' : '') + '" data-radiotoggle>' + ICONS.radio + '</div>' +
@@ -3674,6 +4381,13 @@
 
   function applyUserSize() {
     if (!root) return;
+    if (uiMode === 'fab') {
+      root.style.removeProperty('--rp-user-w');
+      root.style.removeProperty('max-height');
+      root.style.removeProperty('min-height');
+      root.style.removeProperty('height');
+      return;
+    }
     if (collapsed) {
       root.style.removeProperty('--rp-user-w');
       root.style.removeProperty('max-height');
@@ -3707,7 +4421,7 @@
     if (searchOpen) return 'search';
     if (radioOpen) return 'radio';
     if (rpOpen) return 'rp';
-    if (libOpen) return editId !== null ? 'lib-edit' : 'lib';
+    if (libOpen) return editId !== null || editKind === 'fav' ? 'lib-edit' : 'lib';
     if (plOpen) return 'queue';
     return 'main';
   }
@@ -3732,6 +4446,7 @@
 
   function render() {
     if (!shell) return;
+    syncCollapsed();
     refreshTopbar();
     syncYtLayer();
 
@@ -3755,7 +4470,8 @@
     else root.classList.remove(PFX + '-pulse');
 
     let html;
-    if (collapsed) html = (ytNow ? yminHTML() : pillHTML());
+    if (uiMode === 'fab') html = fabHTML();
+    else if (collapsed) html = (ytNow ? yminHTML() : pillHTML());
     else html = panelHTML();
     bodyEl.innerHTML = html;
 
@@ -3775,47 +4491,31 @@
 
     if (keepQ !== null) {
       const i = bodyEl.querySelector('[data-q]');
-      if (i) {
-        i.value = keepQ;
-        i.focus();
-      }
+      if (i) { i.value = keepQ; i.focus(); }
     }
     if (keepRq !== null) {
       const i = bodyEl.querySelector('[data-rq]');
-      if (i) {
-        i.value = keepRq;
-        i.focus();
-      }
+      if (i) { i.value = keepRq; i.focus(); }
     }
     if (keepCfg) {
       const i = bodyEl.querySelector('[data-cfg="' + keepCfg.k + '"]');
-      if (i) {
-        i.value = keepCfg.v;
-        i.focus();
-      }
+      if (i) { i.value = keepCfg.v; i.focus(); }
     }
     if (keepNum) {
       const i = bodyEl.querySelector('[data-rpnum="' + keepNum.k + '"]');
-      if (i) {
-        i.value = keepNum.v;
-        i.focus();
-      }
+      if (i) { i.value = keepNum.v; i.focus(); }
     }
     if (keepHex !== null) {
       const i = bodyEl.querySelector('[data-colorhex]');
-      if (i) {
-        i.value = keepHex;
-        i.focus();
-      }
+      if (i) { i.value = keepHex; i.focus(); }
     }
     if (keepTHex !== null) {
       const i = bodyEl.querySelector('[data-texthex]');
-      if (i) {
-        i.value = keepTHex;
-        i.focus();
-      }
+      if (i) { i.value = keepTHex; i.focus(); }
     }
 
+    updateProgressBarUI();
+    updateVolUI();
     applyMarquee();
 
     setTimeout(function () {
@@ -3833,6 +4533,15 @@
     bodyEl.querySelectorAll('[data-notebtn]').forEach(function (b) {
       if (collapsed) b.innerHTML = isPlaying ? ICONS.pause : ICONS.play;
     });
+    if (uiMode === 'fab') {
+      const fb = bodyEl.querySelector('[data-fabbtn]');
+      if (fb && !fb.getAttribute('data-fabvibe')) fb.innerHTML = isPlaying ? ICONS.pause : ICONS.play;
+      const playingSomething = (curIdx >= 0) || !!window.__rpRadioNow;
+      const wantVibe = rpEnabled() && cfg.rpQuick && !playingSomething;
+      const haveVibe = !!(fb && fb.getAttribute('data-fabvibe'));
+      if (wantVibe !== haveVibe) render();
+      return;
+    }
     if (collapsed) {
       const cur = curTrack();
       const wantYmin = isYtTrack(cur) && ytCurrentEmbed;
@@ -3863,18 +4572,90 @@
   let lpTimer = null, lpFired = false;
   let activePointerId = null;
   let resizing = false, rsx = 0, rsy = 0, rsW = 0, rsH = 0, leftResize = false, startLeft = 0;
+  let fabLpTimer = null, fabLpFired = false, fabDownX = 0, fabDownY = 0;
 
   function clearLongPress() {
-    if (lpTimer) {
-      clearTimeout(lpTimer);
-      lpTimer = null;
-    }
+    if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+  }
+  function clearFabLongPress() {
+    if (fabLpTimer) { clearTimeout(fabLpTimer); fabLpTimer = null; }
   }
 
-  const INTER_SEL = '[data-find],[data-q],[data-play],[data-prev],[data-next],[data-stab],[data-src],[data-rplay],[data-pl],[data-qadd],[data-resplay],[data-resadd],[data-resclear],[data-restoggle],[data-more],[data-queuetoggle],[data-clearqueue],[data-rfind],[data-rchip],[data-rtab],[data-somamore],[data-radiotoggle],[data-libtoggle],[data-pltoggle],[data-searchtab],[data-rptab],[data-savemanual],[data-saverp],[data-loadm],[data-loadrp],[data-vol],[data-plnew],[data-pladd],[data-plpopclose],[data-swatch],[data-textswatch],[data-colorreset],[data-colorclose],[data-sizereset],[data-opacity],[data-editm],[data-editrp],[data-renm],[data-renrp],[data-trkdel],[data-pltrack],[data-editback],[data-delm],[data-delrp],[data-pledit],[data-pldel],[data-rfav],[data-rdelfav],[data-yteye],[data-ytclose],[data-expandfull],[data-quickvibe],[data-rptoggle],[data-rpnum],[data-rplang],[data-profsel],[data-profpick],[data-profpopclose],[data-cfg],[data-resize],[data-resize-left],[data-cancel-search],[data-cancel-rp],[data-link],[data-bgapplytheme],[data-bgapplyall],[data-bgdeltheme],[data-bgdelall],[data-textpick],[data-texthex],[data-textapplytheme],[data-textapplyall],[data-textdel],[data-solidtoggle],[data-solidlighttoggle],[data-soliddarkall],[data-solidlightall],[data-solidnoneall],[data-opapplytheme],[data-opapplyall],[data-bg-url],[data-bg-file],[data-colorpick],[data-colorhex],[data-progress-seek],[data-accentapplytheme],[data-accentapplyall],[data-accentdel]';
+  function switchUiMode(newMode) {
+    if (newMode === uiMode) return;
+    syncCollapsed();
+
+    try {
+      if (root) {
+        const r = root.getBoundingClientRect();
+        if (uiMode === 'fab') { posFabX = Math.round(r.left); posFabY = Math.round(r.top); }
+        else if (collapsed) { posCollapsedX = Math.round(r.left); posCollapsedY = Math.round(r.top); }
+        else { posExpandedX = Math.round(r.left); posExpandedY = Math.round(r.top); }
+      }
+    } catch (_) {}
+
+    const prevRect = root.getBoundingClientRect();
+    const W = VW(), H = VH();
+    const minX = 4, maxX_old = Math.max(0, W - prevRect.width - 4);
+    const minY = TOPBAR, maxY_old = Math.max(0, H - prevRect.height - 4);
+
+    let ratioX = 0, ratioY = 0;
+    if (maxX_old > minX) { ratioX = (prevRect.left - minX) / (maxX_old - minX); ratioX = Math.max(0, Math.min(1, ratioX)); }
+    if (maxY_old > minY) { ratioY = (prevRect.top - minY) / (maxY_old - minY); ratioY = Math.max(0, Math.min(1, ratioY)); }
+
+    uiMode = newMode;
+    syncCollapsed();
+    userW = curSizeW() || userW;
+    userH = curSizeH() || userH;
+
+    const savedX = curPosX(), savedY = curPosY();
+    persistUiMode();
+    render();
+
+    const newRect = root.getBoundingClientRect();
+    const maxX_new = Math.max(0, W - newRect.width - 4);
+    const maxY_new = Math.max(0, H - newRect.height - 4);
+
+    if (savedX >= 0 && savedY >= 0) {
+      posX = savedX;
+      posY = savedY;
+    } else {
+      posX = minX + ratioX * (maxX_new - minX);
+      posY = minY + ratioY * (maxY_new - minY);
+    }
+
+    applyPos();
+    savePos();
+  }
+
+  const INTER_SEL = '[data-find],[data-q],[data-play],[data-prev],[data-next],[data-stab],[data-src],[data-rplay],[data-pl],[data-qadd],[data-resplay],[data-resadd],[data-resclear],[data-restoggle],[data-more],[data-queuetoggle],[data-clearqueue],[data-rfind],[data-rchip],[data-rtab],[data-somamore],[data-radiotoggle],[data-libtoggle],[data-pltoggle],[data-searchtab],[data-rptab],[data-savemanual],[data-saverp],[data-loadm],[data-loadrp],[data-vol],[data-plnew],[data-pladd],[data-plpopclose],[data-swatch],[data-textswatch],[data-colorreset],[data-colorclose],[data-sizereset],[data-opacity],[data-editm],[data-editrp],[data-renm],[data-renrp],[data-trkdel],[data-pltrack],[data-editback],[data-delm],[data-delrp],[data-pledit],[data-pldel],[data-rfav],[data-rdelfav],[data-yteye],[data-ytclose],[data-expandfull],[data-quickvibe],[data-rptoggle],[data-rpnum],[data-rplang],[data-rpgenre],[data-rpsrc],[data-rpacc],[data-profsel],[data-profpick],[data-profpopclose],[data-cfg],[data-resize],[data-resize-left],[data-cancel-search],[data-cancel-rp],[data-link],[data-bgapplytheme],[data-bgapplyall],[data-bgdeltheme],[data-bgdelall],[data-textpick],[data-texthex],[data-textapplytheme],[data-textapplyall],[data-textdel],[data-solidtoggle],[data-solidlighttoggle],[data-soliddarkall],[data-solidlightall],[data-solidnoneall],[data-opapplytheme],[data-opapplyall],[data-bg-url],[data-bg-file],[data-colorpick],[data-colorhex],[data-progress-seek],[data-accentapplytheme],[data-accentapplyall],[data-accentdel],[data-acc],[data-favcur],[data-resfav],[data-qfav],[data-plfav],[data-loadfav],[data-editfav],[data-delfav],[data-favtrack],[data-favdel],[data-exportopen],[data-exportdo],[data-exportcancel],[data-confirmdel],[data-confirmcancel],[data-importbackup],[data-backup],[data-fullreset]';
 
   function onPointerDown(e) {
     const target = e.target;
+
+    const fabBtn = target.closest('[data-fabbtn]');
+    if (fabBtn && uiMode === 'fab') {
+      if (e.button === 2) return;
+      fabLpFired = false;
+      clearFabLongPress();
+      down = true; moved = false; fromHandle = true;
+      activePointerId = e.pointerId;
+      sx = e.clientX; sy = e.clientY;
+      fabDownX = e.clientX; fabDownY = e.clientY;
+      const rect = root.getBoundingClientRect();
+      bl = rect.left; bt = rect.top; bw = rect.width; bh = rect.height;
+      try { fabBtn.setPointerCapture(e.pointerId); } catch (_) {}
+      fabLpTimer = setTimeout(function () {
+        fabLpFired = true;
+        clearFabLongPress();
+        try { if (navigator.vibrate) navigator.vibrate(15); } catch (_) {}
+        down = false;
+        root.classList.remove('dragging');
+        switchUiMode('panel');
+        lockUntil = Date.now() + 450;
+      }, 500);
+      return;
+    }
 
     const rz = target.closest('[data-resize]');
     const lz = target.closest('[data-resize-left]');
@@ -3883,11 +4664,7 @@
       leftResize = !!lz;
       activePointerId = e.pointerId;
       const rect = root.getBoundingClientRect();
-      rsx = e.clientX;
-      rsy = e.clientY;
-      rsW = rect.width;
-      rsH = rect.height;
-      startLeft = rect.left;
+      rsx = e.clientX; rsy = e.clientY; rsW = rect.width; rsH = rect.height; startLeft = rect.left;
       root.classList.add('resizing');
       try { (rz || lz).setPointerCapture(e.pointerId); } catch (_) {}
       if (e.cancelable) e.preventDefault();
@@ -3898,14 +4675,11 @@
     if (themeBtn) {
       lpFired = false;
       clearLongPress();
-      sx = e.clientX;
-      sy = e.clientY;
+      sx = e.clientX; sy = e.clientY;
       lpTimer = setTimeout(function () {
         lpFired = true;
         clearLongPress();
-        try {
-          if (navigator.vibrate) navigator.vibrate(15);
-        } catch (_) {}
+        try { if (navigator.vibrate) navigator.vibrate(15); } catch (_) {}
         bgPending = currentBg() ? JSON.parse(JSON.stringify(currentBg())) : null;
         colorPopOpen = true;
         render();
@@ -3914,23 +4688,31 @@
       return;
     }
 
+    const fabSource = target.closest('[data-fabsource]');
+    if (fabSource && collapsed && uiMode !== 'fab') {
+      lpFired = false;
+      clearLongPress();
+      sx = e.clientX; sy = e.clientY;
+      lpTimer = setTimeout(function () {
+        lpFired = true;
+        clearLongPress();
+        try { if (navigator.vibrate) navigator.vibrate(15); } catch (_) {}
+        switchUiMode('fab');
+        lockUntil = Date.now() + 450;
+      }, 500);
+    }
+
     if (target.closest(INTER_SEL)) return;
 
     const handle = target.closest('[data-handle]');
     if (!handle) return;
     if (e.button === 2) return;
 
-    down = true;
-    moved = false;
-    fromHandle = true;
+    down = true; moved = false; fromHandle = true;
     activePointerId = e.pointerId;
-    sx = e.clientX;
-    sy = e.clientY;
+    sx = e.clientX; sy = e.clientY;
     const rect = root.getBoundingClientRect();
-    bl = rect.left;
-    bt = rect.top;
-    bw = rect.width;
-    bh = rect.height;
+    bl = rect.left; bt = rect.top; bw = rect.width; bh = rect.height;
     try { handle.setPointerCapture(e.pointerId); } catch (_) {}
   }
 
@@ -3965,6 +4747,9 @@
     if (lpTimer) {
       if (Math.hypot(e.clientX - sx, e.clientY - sy) > 8) clearLongPress();
     }
+    if (fabLpTimer) {
+      if (Math.hypot(e.clientX - fabDownX, e.clientY - fabDownY) > 8) clearFabLongPress();
+    }
     if (!down) return;
     const dx = e.clientX - sx, dy = e.clientY - sy;
     if (!moved && Math.hypot(dx, dy) < 6) return;
@@ -3979,17 +4764,16 @@
     if (maxX > 4 && nx > maxX) nx = maxX;
     if (ny < minY) ny = minY;
     if (maxY > minY && ny > maxY) ny = maxY;
-    posX = nx;
-    posY = ny;
+    posX = nx; posY = ny;
     root.style.left = nx + 'px';
     root.style.top = ny + 'px';
   }
+
   function onPointerUp(e) {
     if (activePointerId !== null && e.pointerId !== activePointerId) return;
 
     if (resizing) {
-      resizing = false;
-      leftResize = false;
+      resizing = false; leftResize = false;
       root.classList.remove('resizing');
       activePointerId = null;
       saveSize();
@@ -3997,9 +4781,33 @@
       return;
     }
 
+    const wasFabBtn = e.target && e.target.closest && e.target.closest('[data-fabbtn]');
+    if (uiMode === 'fab' && (fabLpTimer || wasFabBtn) && fromHandle) {
+      clearFabLongPress();
+      const wasMoved = moved;
+      down = false; moved = false; fromHandle = false;
+      root.classList.remove('dragging');
+      activePointerId = null;
+
+      if (fabLpFired) { lockUntil = Date.now() + 450; return; }
+      if (wasMoved) { savePos(); lockUntil = Date.now() + 400; return; }
+
+      const fb = e.target.closest('[data-fabbtn]');
+      if (fb && fb.getAttribute('data-fabvibe')) {
+        clearRpPulse();
+        rpQuickVibe();
+        lockUntil = Date.now() + 300;
+        return;
+      }
+      togglePlay();
+      lockUntil = Date.now() + 300;
+      return;
+    }
+
     if (lpTimer) {
-      clearLongPress();
       const tb = e.target && e.target.closest && e.target.closest('[data-themebtn]');
+      const isFabSource = e.target && e.target.closest && e.target.closest('[data-fabsource]');
+      clearLongPress();
       if (tb && !lpFired) {
         if (Date.now() >= lockUntil) {
           theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
@@ -4008,117 +4816,64 @@
           render();
           lockUntil = Date.now() + 600;
         }
+        activePointerId = null;
+        lockUntil = Date.now() + 600;
+        return;
       }
-      activePointerId = null;
-      lockUntil = Date.now() + 600;
-      return;
+      if (isFabSource && !lpFired) {
+        clearLongPress();
+      } else {
+        activePointerId = null;
+        lockUntil = Date.now() + 600;
+        return;
+      }
     }
 
-    if (!down) {
-      activePointerId = null;
-      return;
-    }
+    if (!down) { activePointerId = null; return; }
 
     down = false;
     root.classList.remove('dragging');
     activePointerId = null;
 
     const wasMoved = moved, wasHandle = fromHandle;
-    moved = false;
-    fromHandle = false;
+    moved = false; fromHandle = false;
 
-    if (wasMoved) {
-      savePos();
-      lockUntil = Date.now() + 400;
-      return;
-    }
+    if (wasMoved) { savePos(); lockUntil = Date.now() + 400; return; }
 
     if (wasHandle) {
       if (Date.now() < lockUntil) return;
       if (e && e.cancelable) e.preventDefault();
       lockUntil = Date.now() + 400;
 
-      try {
-        if (root) {
-          const r = root.getBoundingClientRect();
-          if (collapsed) {
-            posCollapsedX = Math.round(r.left);
-            posCollapsedY = Math.round(r.top);
-          } else {
-            posExpandedX = Math.round(r.left);
-            posExpandedY = Math.round(r.top);
-          }
-        }
-      } catch (_) {}
-
-      const prevRect = root.getBoundingClientRect();
-      const W = VW(), H = VH();
-      const minX = 4, maxX_old = Math.max(0, W - prevRect.width - 4);
-      const minY = TOPBAR, maxY_old = Math.max(0, H - prevRect.height - 4);
-
-      let ratioX = 0;
-      if (maxX_old > minX) {
-        ratioX = (prevRect.left - minX) / (maxX_old - minX);
-        ratioX = Math.max(0, Math.min(1, ratioX));
+      const isFabSource = e.target && e.target.closest && e.target.closest('[data-fabsource]');
+      if (isFabSource) {
+        togglePlay();
+        return;
       }
 
-      let ratioY = 0;
-      if (maxY_old > minY) {
-        ratioY = (prevRect.top - minY) / (maxY_old - minY);
-        ratioY = Math.max(0, Math.min(1, ratioY));
-      }
-
-      collapsed = !collapsed;
-      userW = (collapsed ? sizeCollapsedW : sizeExpandedW) || userW;
-      userH = (collapsed ? sizeCollapsedH : sizeExpandedH) || userH;
-
-      try {
-        const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
-        s.collapsed = collapsed;
-        localStorage.setItem(LS_KEY, JSON.stringify(s));
-      } catch (_) {}
-
-      render();
-
-      const newRect = root.getBoundingClientRect();
-      const maxX_new = Math.max(0, W - newRect.width - 4);
-      const maxY_new = Math.max(0, H - newRect.height - 4);
-
-      posX = minX + ratioX * (maxX_new - minX);
-      posY = minY + ratioY * (maxY_new - minY);
-
-      applyPos();
-      savePos();
+      switchUiMode(collapsed ? 'panel' : 'pill');
     }
   }
 
   function onPointerCancel(e) {
     clearLongPress();
+    clearFabLongPress();
     if (resizing) {
-      resizing = false;
-      leftResize = false;
+      resizing = false; leftResize = false;
       root.classList.remove('resizing');
       saveSize();
     }
-    if (down) {
-      down = false;
-      root.classList.remove('dragging');
-    }
+    if (down) { down = false; root.classList.remove('dragging'); }
     activePointerId = null;
   }
 
   function doSearch(q) {
     if (!q) return;
-    if (cfg.source === 'ytlink') {
-      searchOneSource(YouTubeLink, q);
-      return;
-    }
+    if (cfg.source === 'ytlink') { searchOneSource(YouTubeLink, q); return; }
     runSearch(q, searchTab === 'all' ? 'all' : 'src');
   }
 
-  function rememberScroll() {
-    saveScrollState(renderedScrollKey);
-  }
+  function rememberScroll() { saveScrollState(renderedScrollKey); }
 
   function onClick(e) {
     if (Date.now() < lockUntil) return;
@@ -4129,38 +4884,81 @@
     rememberScroll();
 
     const link = t.closest('[data-link]');
-    if (link) {
-      window.open(link.getAttribute('data-link'), '_blank');
-      return;
-    }
+    if (link) { window.open(link.getAttribute('data-link'), '_blank'); return; }
 
     if (t.closest('[data-resize]') || t.closest('[data-resize-left]')) return;
 
-    if (t.closest('[data-quickvibe]')) {
-      clearRpPulse();
-      rpQuickVibe();
-      lockUntil = Date.now() + 300;
-      return;
+    if (t.closest('[data-favcur]')) { toggleFav(curTrack()); lockUntil = Date.now() + 200; return; }
+
+    let m;
+    if ((m = t.closest('[data-resfav]'))) { toggleFav(results[parseInt(m.getAttribute('data-resfav'), 10)]); lockUntil = Date.now() + 200; return; }
+    if ((m = t.closest('[data-qfav]'))) { toggleFav(queue[parseInt(m.getAttribute('data-qfav'), 10)]); lockUntil = Date.now() + 200; return; }
+    if ((m = t.closest('[data-plfav]'))) {
+      const i = parseInt(m.getAttribute('data-plfav'), 10);
+      let pl = editKind === 'm' ? lib.manual.find(function (x) { return x.id === editId; }) : lib.rp[editId];
+      if (pl && pl.tracks && pl.tracks[i]) toggleFav(pl.tracks[i]);
+      lockUntil = Date.now() + 200; return;
     }
 
-    if (t.closest('[data-yteye]')) {
-      ytHidden = !ytHidden;
-      applyEyeState();
-      return;
+    if (t.closest('[data-loadfav]')) { loadPlaylist(lib.favorites); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-editfav]')) { editKind = 'fav'; editId = '__fav__'; scrollMemory.lib = 0; render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-delfav]')) { confirmDelete = { kind: 'fav', id: '1' }; deleteFavorites(); confirmDelete = null; lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-favtrack]'))) {
+      const i = parseInt(m.getAttribute('data-favtrack'), 10);
+      if (lib.favorites[i]) { queue.push(JSON.parse(JSON.stringify(lib.favorites[i]))); saveQueue(); playIndex(queue.length - 1); }
+      lockUntil = Date.now() + 300; return;
+    }
+    if ((m = t.closest('[data-favdel]'))) { deleteTrackFromFav(parseInt(m.getAttribute('data-favdel'), 10)); lockUntil = Date.now() + 300; return; }
+
+    if ((m = t.closest('[data-exportopen]'))) { exportPop = { kind: m.getAttribute('data-exportopen') }; render(); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-exportdo]'))) {
+      const kind = exportPop ? exportPop.kind : (editKind === 'fav' ? 'fav' : editKind);
+      doExportPlaylist(kind, m.getAttribute('data-exportdo'));
+      lockUntil = Date.now() + 300; return;
+    }
+    if (t.closest('[data-exportcancel]')) { exportPop = null; render(); lockUntil = Date.now() + 300; return; }
+
+    if (t.closest('[data-confirmdel]')) {
+      if (confirmDelete) {
+        const cd = confirmDelete;
+        confirmDelete = null;
+        if (cd.kind === 'm') deleteManual(cd.id);
+        else if (cd.kind === 'rp') deleteRp(cd.id);
+        else if (cd.kind === 'reset') fullReset();
+        else render();
+      }
+      lockUntil = Date.now() + 300; return;
+    }
+    if (t.closest('[data-confirmcancel]')) { confirmDelete = null; render(); lockUntil = Date.now() + 300; return; }
+
+    if (t.closest('[data-importbackup]')) { triggerImport(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-backup]')) { backupAll(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-fullreset]')) { confirmDelete = { kind: 'reset' }; render(); lockUntil = Date.now() + 300; return; }
+
+    if ((m = t.closest('[data-acc]'))) {
+      const k = m.getAttribute('data-acc');
+      if (k === 'accent') accAccent = !accAccent;
+      else if (k === 'text') accText = !accText;
+      else if (k === 'solid') accSolid = !accSolid;
+      else if (k === 'bg') accBg = !accBg;
+      render(); lockUntil = Date.now() + 200; return;
     }
 
-    if (t.closest('[data-ytclose]')) {
-      closeYt();
-      return;
+    if ((m = t.closest('[data-rpacc]'))) {
+      const k = m.getAttribute('data-rpacc');
+      if (k === 'lang') rpAccLang = !rpAccLang;
+      else if (k === 'genre') rpAccGenre = !rpAccGenre;
+      else if (k === 'source') rpAccSource = !rpAccSource;
+      render(); lockUntil = Date.now() + 200; return;
     }
 
-    if (t.closest('[data-expandfull]')) {
-      collapsed = false;
-      clearRpPulse();
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if ((m = t.closest('[data-rpsrc]'))) { cfg.rpSource = m.getAttribute('data-rpsrc'); saveCfg(); render(); lockUntil = Date.now() + 200; return; }
+    if ((m = t.closest('[data-rpgenre]'))) { cfg.rpGenre = m.getAttribute('data-rpgenre'); saveCfg(); render(); lockUntil = Date.now() + 200; return; }
+
+    if (t.closest('[data-quickvibe]')) { clearRpPulse(); rpQuickVibe(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-yteye]')) { ytHidden = !ytHidden; applyEyeState(); return; }
+    if (t.closest('[data-ytclose]')) { closeYt(); return; }
+    if (t.closest('[data-expandfull]')) { switchUiMode('panel'); clearRpPulse(); lockUntil = Date.now() + 300; return; }
 
     if (t.closest('[data-themebtn]')) {
       if (e.pointerType === 'mouse' || !e.pointerType) {
@@ -4173,750 +4971,167 @@
       return;
     }
 
-    const sw = t.closest('[data-swatch]');
-    if (sw) {
-      setAccentForTheme(theme, sw.getAttribute('data-swatch'));
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if ((m = t.closest('[data-swatch]'))) { setAccentForTheme(theme, m.getAttribute('data-swatch')); render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-accentapplytheme]')) { const hx = bodyEl.querySelector('[data-colorhex]'); setAccentForTheme(theme, hx ? hx.value.trim() : ''); render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-accentapplyall]')) { const hx = bodyEl.querySelector('[data-colorhex]'); setAccentForAll(hx ? hx.value.trim() : ''); render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-accentdel]')) { setAccentForTheme(theme, ''); render(); lockUntil = Date.now() + 300; return; }
 
-    if (t.closest('[data-accentapplytheme]')) {
-      const hx = bodyEl.querySelector('[data-colorhex]');
-      setAccentForTheme(theme, hx ? hx.value.trim() : '');
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if ((m = t.closest('[data-textswatch]'))) { setTextColorForTheme(theme, m.getAttribute('data-textswatch')); render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-textapplytheme]')) { const hx = bodyEl.querySelector('[data-texthex]'); setTextColorForTheme(theme, hx ? hx.value.trim() : ''); render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-textapplyall]')) { const hx = bodyEl.querySelector('[data-texthex]'); setTextColorForAll(hx ? hx.value.trim() : ''); render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-textdel]')) { setTextColorForTheme(theme, ''); render(); lockUntil = Date.now() + 300; return; }
 
-    if (t.closest('[data-accentapplyall]')) {
-      const hx = bodyEl.querySelector('[data-colorhex]');
-      setAccentForAll(hx ? hx.value.trim() : '');
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-accentdel]')) {
-      setAccentForTheme(theme, '');
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const tsw = t.closest('[data-textswatch]');
-    if (tsw) {
-      setTextColorForTheme(theme, tsw.getAttribute('data-textswatch'));
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-textapplytheme]')) {
-      const hx = bodyEl.querySelector('[data-texthex]');
-      setTextColorForTheme(theme, hx ? hx.value.trim() : '');
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-textapplyall]')) {
-      const hx = bodyEl.querySelector('[data-texthex]');
-      setTextColorForAll(hx ? hx.value.trim() : '');
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-textdel]')) {
-      setTextColorForTheme(theme, '');
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-solidtoggle]')) {
-      const on = !isSolidTheme();
-      if (on) setSolidLightForTheme(theme, false);
-      setSolidForTheme(theme, on);
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-solidlighttoggle]')) {
-      const on = !isSolidLightTheme();
-      if (on) setSolidForTheme(theme, false);
-      setSolidLightForTheme(theme, on);
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-soliddarkall]')) {
-      setSolidLightForAll(false);
-      setSolidForAll(true);
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-solidlightall]')) {
-      setSolidForAll(false);
-      setSolidLightForAll(true);
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-solidnoneall]')) {
-      setSolidForAll(false);
-      setSolidLightForAll(false);
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if (t.closest('[data-solidtoggle]')) { const on = !isSolidTheme(); if (on) setSolidLightForTheme(theme, false); setSolidForTheme(theme, on); render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-solidlighttoggle]')) { const on = !isSolidLightTheme(); if (on) setSolidForTheme(theme, false); setSolidLightForTheme(theme, on); render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-soliddarkall]')) { setSolidLightForAll(false); setSolidForAll(true); render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-solidlightall]')) { setSolidForAll(false); setSolidLightForAll(true); render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-solidnoneall]')) { setSolidForAll(false); setSolidLightForAll(false); render(); lockUntil = Date.now() + 300; return; }
 
     if (t.closest('[data-opapplytheme]')) {
       const op = (bgPending && typeof bgPending.opacity === 'number') ? bgPending.opacity : undefined;
-      if (typeof op === 'number') {
-        if (!cfg.bgByTheme[theme]) cfg.bgByTheme[theme] = {};
-        cfg.bgByTheme[theme].opacity = op;
-        saveCfg();
-        applyAccentVar();
-      }
-      lockUntil = Date.now() + 300;
-      return;
+      if (typeof op === 'number') { if (!cfg.bgByTheme[theme]) cfg.bgByTheme[theme] = {}; cfg.bgByTheme[theme].opacity = op; saveCfg(); applyAccentVar(); }
+      lockUntil = Date.now() + 300; return;
     }
-
     if (t.closest('[data-opapplyall]')) {
       const op = (bgPending && typeof bgPending.opacity === 'number') ? bgPending.opacity : undefined;
-      if (typeof op === 'number') {
-        THEMES.forEach(function (tm) {
-          if (!cfg.bgByTheme[tm]) cfg.bgByTheme[tm] = {};
-          cfg.bgByTheme[tm].opacity = op;
-        });
-        saveCfg();
-        applyAccentVar();
-      }
-      lockUntil = Date.now() + 300;
-      return;
+      if (typeof op === 'number') { THEMES.forEach(function (tm) { if (!cfg.bgByTheme[tm]) cfg.bgByTheme[tm] = {}; cfg.bgByTheme[tm].opacity = op; }); saveCfg(); applyAccentVar(); }
+      lockUntil = Date.now() + 300; return;
     }
 
-    if (t.closest('[data-sizereset]')) {
-      userW = 0;
-      userH = 0;
-      saveSize();
-      applyUserSize();
-      applyPos();
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if (t.closest('[data-sizereset]')) { userW = 0; userH = 0; saveSize(); applyUserSize(); applyPos(); render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-colorreset]')) { setAccentForTheme(theme, ''); cfg.opacity = -1; saveCfg(); bgPending = null; applyAccentVar(); render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-colorclose]')) { colorPopOpen = false; bgPending = null; render(); lockUntil = Date.now() + 300; return; }
 
-    if (t.closest('[data-colorreset]')) {
-      setAccentForTheme(theme, '');
-      cfg.opacity = -1;
-      saveCfg();
-      bgPending = null;
-      applyAccentVar();
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if (t.closest('[data-bgapplytheme]')) { applyBgToTheme(theme, bgForApplyOrCurrent()); bgPending = null; render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-bgapplyall]')) { applyBgToAllThemes(bgForApplyOrCurrent()); bgPending = null; render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-bgdeltheme]')) { applyBgToTheme(theme, null); bgPending = null; render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-bgdelall]')) { applyBgToAllThemes(null); bgPending = null; render(); lockUntil = Date.now() + 300; return; }
 
-    if (t.closest('[data-colorclose]')) {
-      colorPopOpen = false;
-      bgPending = null;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if (t.closest('[data-plpopclose]')) { plPop = null; render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-profpopclose]')) { profPop = false; render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-profsel]')) { profPop = !profPop; render(); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-profpick]'))) { cfg.rpProfile = m.getAttribute('data-profpick'); saveCfg(); profPop = false; render(); lockUntil = Date.now() + 300; return; }
 
-    if (t.closest('[data-bgapplytheme]')) {
-      const b = bgForApplyOrCurrent();
-      applyBgToTheme(theme, b);
-      bgPending = null;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if (t.closest('[data-resclear]')) { clearSearch(); clearRpPulse(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-restoggle]')) { resCollapsed = !resCollapsed; render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-more]')) { searchMore(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-queuetoggle]')) { queueCollapsed = !queueCollapsed; render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-clearqueue]')) { clearQueue(); lockUntil = Date.now() + 300; return; }
 
-    if (t.closest('[data-bgapplyall]')) {
-      const b = bgForApplyOrCurrent();
-      applyBgToAllThemes(b);
-      bgPending = null;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if (t.closest('[data-searchtab]')) { searchOpen = !searchOpen; if (searchOpen) { radioOpen = false; rpOpen = false; libOpen = false; plOpen = false; } render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-rptab]')) { rpOpen = !rpOpen; if (rpOpen) { searchOpen = false; radioOpen = false; libOpen = false; plOpen = false; } render(); lockUntil = Date.now() + 300; return; }
 
-    if (t.closest('[data-bgdeltheme]')) {
-      applyBgToTheme(theme, null);
-      bgPending = null;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-bgdelall]')) {
-      applyBgToAllThemes(null);
-      bgPending = null;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-plpopclose]')) {
-      plPop = null;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-profpopclose]')) {
-      profPop = false;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-profsel]')) {
-      profPop = !profPop;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const pp = t.closest('[data-profpick]');
-    if (pp) {
-      cfg.rpProfile = pp.getAttribute('data-profpick');
-      saveCfg();
-      profPop = false;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-resclear]')) {
-      clearSearch();
-      clearRpPulse();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-restoggle]')) {
-      resCollapsed = !resCollapsed;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-more]')) {
-      searchMore();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-queuetoggle]')) {
-      queueCollapsed = !queueCollapsed;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-clearqueue]')) {
-      clearQueue();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-searchtab]')) {
-      searchOpen = !searchOpen;
-      if (searchOpen) {
-        radioOpen = false;
-        rpOpen = false;
-        libOpen = false;
-        plOpen = false;
-      }
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-rptab]')) {
-      rpOpen = !rpOpen;
-      if (rpOpen) {
-        searchOpen = false;
-        radioOpen = false;
-        libOpen = false;
-        plOpen = false;
-      }
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const rptg = t.closest('[data-rptoggle]');
-    if (rptg) {
-      const k = rptg.getAttribute('data-rptoggle');
+    if ((m = t.closest('[data-rptoggle]'))) {
+      const k = m.getAttribute('data-rptoggle');
       cfg[k] = !cfg[k];
       saveCfg();
+      if (k === 'debug') { DEBUG = cfg.debug; info('debug logging ' + (DEBUG ? 'ON' : 'OFF')); }
       if (k === 'rpAuto' && cfg.rpAuto) rpMsgCounter = 0;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
+      render(); lockUntil = Date.now() + 300; return;
     }
 
-    const rpl2 = t.closest('[data-rplang]');
-    if (rpl2) {
-      cfg.rpLang = rpl2.getAttribute('data-rplang');
-      saveCfg();
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if ((m = t.closest('[data-rplang]'))) { cfg.rpLang = m.getAttribute('data-rplang'); saveCfg(); render(); lockUntil = Date.now() + 300; return; }
 
     if (t.closest('[data-plnew]')) {
       if (plPop === 'queue') createManualFromQueue();
       else if (typeof plPop === 'object' && plPop && plPop.kind === 'qtrack') createManualFromTrack(queue[plPop.i]);
-      else if (typeof plPop === 'object' && plPop && plPop.kind === 'restrack') {
-        createManualFromTrack(results[plPop.i]);
-        if (resultsRp) {
-          addToRpPlaylist(results[plPop.i]);
-          clearRpPulse();
-        }
-      } else {
-        createManualFromTrack(results[plPop]);
-      }
-      plPop = null;
-      lockUntil = Date.now() + 300;
-      return;
+      else if (typeof plPop === 'object' && plPop && plPop.kind === 'restrack') { createManualFromTrack(results[plPop.i]); if (resultsRp) { addToRpPlaylist(results[plPop.i]); clearRpPulse(); } }
+      else createManualFromTrack(results[plPop]);
+      plPop = null; lockUntil = Date.now() + 300; return;
     }
 
-    const pa = t.closest('[data-pladd]');
-    if (pa) {
+    if ((m = t.closest('[data-pladd]'))) {
       let trk = null;
       if (plPop === 'queue') trk = curTrack();
       else if (typeof plPop === 'object' && plPop && plPop.kind === 'qtrack') trk = queue[plPop.i];
-      else if (typeof plPop === 'object' && plPop && plPop.kind === 'restrack') {
-        trk = results[plPop.i];
-        if (resultsRp) {
-          addToRpPlaylist(trk);
-          clearRpPulse();
-        }
-      } else {
-        trk = results[plPop];
-      }
-      addTrackToManual(pa.getAttribute('data-pladd'), trk);
-      lockUntil = Date.now() + 300;
-      return;
+      else if (typeof plPop === 'object' && plPop && plPop.kind === 'restrack') { trk = results[plPop.i]; if (resultsRp) { addToRpPlaylist(trk); clearRpPulse(); } }
+      else trk = results[plPop];
+      addTrackToManual(m.getAttribute('data-pladd'), trk);
+      lockUntil = Date.now() + 300; return;
     }
 
-    const stab = t.closest('[data-stab]');
-    if (stab) {
-      searchTab = stab.getAttribute('data-stab');
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if ((m = t.closest('[data-stab]'))) { searchTab = m.getAttribute('data-stab'); render(); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-resadd]'))) { enqueueResult(results[parseInt(m.getAttribute('data-resadd'), 10)], false); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-resplay]'))) { enqueueResult(results[parseInt(m.getAttribute('data-resplay'), 10)], true); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-qadd]'))) { plPop = { kind: 'qtrack', i: parseInt(m.getAttribute('data-qadd'), 10) }; render(); lockUntil = Date.now() + 300; return; }
 
-    const ra = t.closest('[data-resadd]');
-    if (ra) {
-      enqueueResult(results[parseInt(ra.getAttribute('data-resadd'), 10)], false);
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if (t.closest('[data-radiotoggle]')) { radioOpen = !radioOpen; if (radioOpen) { searchOpen = false; rpOpen = false; libOpen = false; plOpen = false; } render(); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-rtab]'))) { radioTab = m.getAttribute('data-rtab'); render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-somamore]')) { loadMoreSomaStations(); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-rchip]'))) { searchRadioBrowser(m.getAttribute('data-rchip')); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-rfind]')) { const inp = bodyEl.querySelector('[data-rq]'); const q = inp ? inp.value.trim() : ''; if (q) searchRadioBrowser(q); lockUntil = Date.now() + 300; return; }
 
-    const rpl = t.closest('[data-resplay]');
-    if (rpl) {
-      enqueueResult(results[parseInt(rpl.getAttribute('data-resplay'), 10)], true);
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if ((m = t.closest('[data-rfav]'))) { toggleRadioFav({ name: m.getAttribute('data-rfname'), url: m.getAttribute('data-rfav'), tag: m.getAttribute('data-rftag') }); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-rdelfav]'))) { radioFav = radioFav.filter(function (s) { return s.url !== m.getAttribute('data-rdelfav'); }); saveRadioFav(); render(); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-rplay]'))) { playRadio({ name: m.getAttribute('data-rname'), url: m.getAttribute('data-rplay'), tag: m.getAttribute('data-rtag') }); lockUntil = Date.now() + 300; return; }
 
-    const qadd = t.closest('[data-qadd]');
-    if (qadd) {
-      plPop = { kind: 'qtrack', i: parseInt(qadd.getAttribute('data-qadd'), 10) };
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if ((m = t.closest('[data-src]'))) { cfg.source = m.getAttribute('data-src'); searchTab = 'src'; results = []; saveCfg(); dbg('search', 'source switched to', cfg.source); render(); lockUntil = Date.now() + 300; return; }
 
-    if (t.closest('[data-radiotoggle]')) {
-      radioOpen = !radioOpen;
-      if (radioOpen) {
-        searchOpen = false;
-        rpOpen = false;
-        libOpen = false;
-        plOpen = false;
-      }
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if ((m = t.closest('[data-renm]'))) { renamePlaylistManual(m.getAttribute('data-renm')); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-renrp]'))) { renamePlaylistRp(m.getAttribute('data-renrp')); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-pledit]'))) { renameItem(parseInt(m.getAttribute('data-pledit'), 10)); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-pldel]'))) { removeFromQueue(parseInt(m.getAttribute('data-pldel'), 10)); lockUntil = Date.now() + 300; return; }
 
-    const rt = t.closest('[data-rtab]');
-    if (rt) {
-      radioTab = rt.getAttribute('data-rtab');
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if ((m = t.closest('[data-editm]'))) { editId = m.getAttribute('data-editm'); editKind = 'm'; exportPop = null; scrollMemory.lib = 0; render(); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-editrp]'))) { editId = m.getAttribute('data-editrp'); editKind = 'rp'; exportPop = null; scrollMemory.lib = 0; render(); lockUntil = Date.now() + 300; return; }
 
-    if (t.closest('[data-somamore]')) {
-      loadMoreSomaStations();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const rch = t.closest('[data-rchip]');
-    if (rch) {
-      searchRadioBrowser(rch.getAttribute('data-rchip'));
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const rfb = t.closest('[data-rfind]');
-    if (rfb) {
-      const inp = bodyEl.querySelector('[data-rq]');
-      const q = inp ? inp.value.trim() : '';
-      if (q) searchRadioBrowser(q);
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const rfav = t.closest('[data-rfav]');
-    if (rfav) {
-      toggleRadioFav({
-        name: rfav.getAttribute('data-rfname'),
-        url: rfav.getAttribute('data-rfav'),
-        tag: rfav.getAttribute('data-rftag')
-      });
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const rdf = t.closest('[data-rdelfav]');
-    if (rdf) {
-      radioFav = radioFav.filter(function (s) {
-        return s.url !== rdf.getAttribute('data-rdelfav');
-      });
-      saveRadioFav();
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const rp = t.closest('[data-rplay]');
-    if (rp) {
-      playRadio({
-        name: rp.getAttribute('data-rname'),
-        url: rp.getAttribute('data-rplay'),
-        tag: rp.getAttribute('data-rtag')
-      });
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const sb = t.closest('[data-src]');
-    if (sb) {
-      cfg.source = sb.getAttribute('data-src');
-      searchTab = 'src';
-      results = [];
-      saveCfg();
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const ren = t.closest('[data-renm]');
-    if (ren) {
-      renamePlaylistManual(ren.getAttribute('data-renm'));
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const renr = t.closest('[data-renrp]');
-    if (renr) {
-      renamePlaylistRp(renr.getAttribute('data-renrp'));
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const ed = t.closest('[data-pledit]');
-    if (ed) {
-      renameItem(parseInt(ed.getAttribute('data-pledit'), 10));
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const del = t.closest('[data-pldel]');
-    if (del) {
-      removeFromQueue(parseInt(del.getAttribute('data-pldel'), 10));
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const em = t.closest('[data-editm]');
-    if (em) {
-      editId = em.getAttribute('data-editm');
-      editKind = 'm';
-      scrollMemory.lib = 0;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const er = t.closest('[data-editrp]');
-    if (er) {
-      editId = er.getAttribute('data-editrp');
-      editKind = 'rp';
-      scrollMemory.lib = 0;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const td = t.closest('[data-trkdel]');
-    if (td) {
-      const i = parseInt(td.getAttribute('data-trkdel'), 10);
+    if ((m = t.closest('[data-trkdel]'))) {
+      const i = parseInt(m.getAttribute('data-trkdel'), 10);
       if (editKind === 'm') deleteTrackFromManual(editId, i);
       else deleteTrackFromRp(editId, i);
-      lockUntil = Date.now() + 300;
-      return;
+      lockUntil = Date.now() + 300; return;
     }
 
-    const plt = t.closest('[data-pltrack]');
-    if (plt) {
-      const i = parseInt(plt.getAttribute('data-pltrack'), 10);
-      let pl = null;
-      if (editKind === 'm') pl = lib.manual.find(function (x) { return x.id === editId; });
-      else pl = lib.rp[editId];
-
-      if (pl && pl.tracks && pl.tracks[i]) {
-        queue.push(JSON.parse(JSON.stringify(pl.tracks[i])));
-        saveQueue();
-        playIndex(queue.length - 1);
-      }
-
-      lockUntil = Date.now() + 300;
-      return;
+    if ((m = t.closest('[data-pltrack]'))) {
+      const i = parseInt(m.getAttribute('data-pltrack'), 10);
+      let pl = editKind === 'm' ? lib.manual.find(function (x) { return x.id === editId; }) : lib.rp[editId];
+      if (pl && pl.tracks && pl.tracks[i]) { queue.push(JSON.parse(JSON.stringify(pl.tracks[i]))); saveQueue(); playIndex(queue.length - 1); }
+      lockUntil = Date.now() + 300; return;
     }
 
-    if (t.closest('[data-editback]')) {
-      editId = null;
-      editKind = null;
-      scrollMemory.lib = 0;
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if (t.closest('[data-editback]')) { editId = null; editKind = null; exportPop = null; scrollMemory.lib = 0; render(); lockUntil = Date.now() + 300; return; }
 
-    const dm = t.closest('[data-delm]');
-    if (dm) {
-      deleteManual(dm.getAttribute('data-delm'));
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if ((m = t.closest('[data-delm]'))) { confirmDelete = { kind: 'm', id: m.getAttribute('data-delm') }; render(); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-delrp]'))) { confirmDelete = { kind: 'rp', id: m.getAttribute('data-delrp') }; render(); lockUntil = Date.now() + 300; return; }
 
-    const dr = t.closest('[data-delrp]');
-    if (dr) {
-      deleteRp(dr.getAttribute('data-delrp'));
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if ((m = t.closest('[data-loadm]'))) { const p = lib.manual.find(function (x) { return x.id === m.getAttribute('data-loadm'); }); if (p) loadPlaylist(p.tracks); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-loadrp]'))) { const p = lib.rp[m.getAttribute('data-loadrp')]; if (p) loadPlaylist(p.tracks); lockUntil = Date.now() + 300; return; }
 
-    const lm = t.closest('[data-loadm]');
-    if (lm) {
-      const p = lib.manual.find(function (x) {
-        return x.id === lm.getAttribute('data-loadm');
-      });
-      if (p) loadPlaylist(p.tracks);
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if (t.closest('[data-savemanual]')) { plPop = 'queue'; render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-saverp]')) { saveCurrentAsRp(); lockUntil = Date.now() + 300; return; }
 
-    const lr = t.closest('[data-loadrp]');
-    if (lr) {
-      const p = lib.rp[lr.getAttribute('data-loadrp')];
-      if (p) loadPlaylist(p.tracks);
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if ((m = t.closest('[data-pl]'))) { playIndex(parseInt(m.getAttribute('data-pl'), 10)); lockUntil = Date.now() + 300; return; }
 
-    if (t.closest('[data-savemanual]')) {
-      plPop = 'queue';
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-saverp]')) {
-      saveCurrentAsRp();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    const it = t.closest('[data-pl]');
-    if (it) {
-      playIndex(parseInt(it.getAttribute('data-pl'), 10));
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-cancel-search]')) {
-      cancelSearch();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-cancel-rp]')) {
-      cancelRp();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if (t.closest('[data-cancel-search]')) { cancelSearch(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-cancel-rp]')) { cancelRp(); lockUntil = Date.now() + 300; return; }
 
     if (t.closest('[data-notebtn]')) {
-      if (moved) {
-        lockUntil = Date.now() + 300;
-        return;
-      }
-
-      if (!collapsed) {
-        try {
-          if (root) {
-            const r = root.getBoundingClientRect();
-            if (collapsed) {
-              posCollapsedX = Math.round(r.left);
-              posCollapsedY = Math.round(r.top);
-            } else {
-              posExpandedX = Math.round(r.left);
-              posExpandedY = Math.round(r.top);
-            }
-          }
-        } catch (_) {}
-
-        const prevRect = root.getBoundingClientRect();
-        collapsed = true;
-        posX = prevRect.left;
-        posY = prevRect.top;
-        userW = sizeCollapsedW || userW;
-        userH = sizeCollapsedH || userH;
-
-        try {
-          const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
-          s.collapsed = collapsed;
-          localStorage.setItem(LS_KEY, JSON.stringify(s));
-        } catch (_) {}
-
-        render();
-        lockUntil = Date.now() + 300;
-        return;
-      } else {
-        const cur = curTrack();
-        if (curIdx < 0) {
-          if (window.__rpRadioNow) {
-            if (isPlaying) {
-              try { audio.pause(); } catch (_) {}
-              isPlaying = false;
-            } else {
-              try { audio.play(); } catch (_) {}
-              isPlaying = true;
-            }
-            updatePlayBtn();
-            lockUntil = Date.now() + 300;
-            return;
-          }
-          statusMsg = 'Сначала найдите трек';
-          render();
-          lockUntil = Date.now() + 300;
-          return;
-        }
-
-        if (isYtTrack(cur) && ytCurrentEmbed) return;
-
-        if (isPlaying) {
-          try { audio.pause(); } catch (_) {}
-          isPlaying = false;
-        } else {
-          playIndex(curIdx);
-          return;
-        }
-
-        updatePlayBtn();
-        lockUntil = Date.now() + 300;
-        return;
-      }
-    }
-
-    if (t.closest('[data-libtoggle]')) {
-      libOpen = !libOpen;
-      if (libOpen) {
-        searchOpen = false;
-        radioOpen = false;
-        rpOpen = false;
-        plOpen = false;
-        editId = null;
-        editKind = null;
-      }
-      render();
+      if (moved) { lockUntil = Date.now() + 300; return; }
+      switchUiMode('pill');
       lockUntil = Date.now() + 300;
       return;
     }
 
-    if (t.closest('[data-pltoggle]')) {
-      plOpen = !plOpen;
-      if (plOpen) {
-        searchOpen = false;
-        radioOpen = false;
-        rpOpen = false;
-        libOpen = false;
-      }
-      render();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if (t.closest('[data-libtoggle]')) { libOpen = !libOpen; if (libOpen) { searchOpen = false; radioOpen = false; rpOpen = false; plOpen = false; editId = null; editKind = null; exportPop = null; } render(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-pltoggle]')) { plOpen = !plOpen; if (plOpen) { searchOpen = false; radioOpen = false; rpOpen = false; libOpen = false; } render(); lockUntil = Date.now() + 300; return; }
 
-    if (t.closest('[data-play]')) {
-      togglePlay();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-prev]')) {
-      prevTrack();
-      lockUntil = Date.now() + 300;
-      return;
-    }
-
-    if (t.closest('[data-next]')) {
-      nextTrack();
-      lockUntil = Date.now() + 300;
-      return;
-    }
+    if (t.closest('[data-play]') && !t.closest('[data-fabsource]')) { togglePlay(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-prev]')) { prevTrack(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-next]')) { nextTrack(); lockUntil = Date.now() + 300; return; }
 
     if (t.closest('[data-find]')) {
       const inp = bodyEl.querySelector('[data-q]');
       const q = inp ? inp.value.trim() : '';
-      if (q) {
-        doSearch(q);
-        if (inp) inp.value = '';
-      }
-      lockUntil = Date.now() + 300;
-      return;
+      if (q) { doSearch(q); if (inp) inp.value = ''; }
+      lockUntil = Date.now() + 300; return;
     }
   }
 
   function onKey(e) {
     if (e.target && e.target.hasAttribute('data-q') && e.key === 'Enter') {
       const q = e.target.value.trim();
-      if (q) {
-        doSearch(q);
-        e.target.value = '';
-      }
+      if (q) { doSearch(q); e.target.value = ''; }
     }
-
     if (e.target && e.target.hasAttribute('data-rq') && e.key === 'Enter') {
       const q = e.target.value.trim();
       if (q) searchRadioBrowser(q);
@@ -4929,9 +5144,11 @@
 
     if (el.hasAttribute('data-vol')) {
       audio.volume = Math.max(0, Math.min(1, Number(el.value) / 100));
+      sliderFill(el, Math.round(audio.volume * 100), 100);
     } else if (el.hasAttribute('data-progress-seek')) {
       audio.currentTime = Number(el.value);
       audioCurrentTime = audio.currentTime;
+      sliderFill(el, audioCurrentTime, audioDuration || 100);
       updateProgressBarUI();
     } else if (el.hasAttribute('data-opacity')) {
       const val = Math.max(0, Math.min(100, parseInt(el.value, 10) || 0));
@@ -4946,26 +5163,16 @@
       if (hx) hx.value = accentColor();
     } else if (el.hasAttribute('data-colorhex')) {
       const v = el.value.trim();
-      if (!v) {
-        setAccentForTheme(theme, '');
-      } else if (validHex(v)) {
-        setAccentForTheme(theme, v);
-        const cp = bodyEl.querySelector('[data-colorpick]');
-        if (cp) cp.value = normHex(v);
-      }
+      if (!v) setAccentForTheme(theme, '');
+      else if (validHex(v)) { setAccentForTheme(theme, v); const cp = bodyEl.querySelector('[data-colorpick]'); if (cp) cp.value = normHex(v); }
     } else if (el.hasAttribute('data-textpick')) {
       setTextColorForTheme(theme, el.value);
       const hx = bodyEl.querySelector('[data-texthex]');
       if (hx) hx.value = currentTextColor();
     } else if (el.hasAttribute('data-texthex')) {
       const v = el.value.trim();
-      if (!v) {
-        setTextColorForTheme(theme, '');
-      } else if (validHex(v)) {
-        setTextColorForTheme(theme, v);
-        const cp = bodyEl.querySelector('[data-textpick]');
-        if (cp) cp.value = normHex(v);
-      }
+      if (!v) setTextColorForTheme(theme, '');
+      else if (validHex(v)) { setTextColorForTheme(theme, v); const cp = bodyEl.querySelector('[data-textpick]'); if (cp) cp.value = normHex(v); }
     } else if (el.hasAttribute('data-bg-url')) {
       setBgPendingFromUrl(el.value || '');
       const nm = bodyEl.querySelector('[data-bgfile-name]');
@@ -4997,18 +5204,15 @@
     try {
       const et = c.eventTypes;
       const evRecv = et.MESSAGE_RECEIVED || et.message_received;
+      const evSent = et.MESSAGE_SENT || et.message_sent;
       const evChat = et.CHAT_CHANGED || et.chat_changed;
 
-      if (evRecv) c.eventSource.on(evRecv, function () {
-        onChatMessage();
-      });
-
-      if (evChat) c.eventSource.on(evChat, function () {
-        rpMsgCounter = 0;
-        clearRpPulse();
-      });
+      if (evRecv) c.eventSource.on(evRecv, function () { onChatMessage(); });
+      if (evSent) c.eventSource.on(evSent, function () { onChatMessage(); });
+      if (evChat) c.eventSource.on(evChat, function () { rpMsgCounter = 0; clearRpPulse(); });
+      dbg('events', 'bound recv=', !!evRecv, 'sent=', !!evSent, 'chat=', !!evChat);
     } catch (e) {
-      console.warn('[RP_Player] bindChatEvents fail', e);
+      warn('bindChatEvents fail', e);
     }
   }
 
@@ -5128,16 +5332,10 @@
         const wrap = function (fn) {
           return function (e) {
             const p = e.touches ? e.touches[0] : e;
-            if (p) {
-              e.clientX = p.clientX;
-              e.clientY = p.clientY;
-              e.pointerId = 1;
-              e.button = e.button || 0;
-            }
+            if (p) { e.clientX = p.clientX; e.clientY = p.clientY; e.pointerId = 1; e.button = e.button || 0; }
             fn(e);
           };
         };
-
         root.addEventListener('mousedown', wrap(onPointerDown));
         window.addEventListener('mousemove', wrap(onPointerMove));
         window.addEventListener('mouseup', wrap(onPointerUp));
@@ -5158,6 +5356,18 @@
           colorPopOpen = true;
           bgPending = currentBg() ? JSON.parse(JSON.stringify(currentBg())) : null;
           render();
+          return;
+        }
+        const fb = e.target && e.target.closest && e.target.closest('[data-fabbtn]');
+        if (fb && uiMode === 'fab') {
+          e.preventDefault();
+          switchUiMode('panel');
+          return;
+        }
+        const fs = e.target && e.target.closest && e.target.closest('[data-fabsource]');
+        if (fs && collapsed && uiMode !== 'fab') {
+          e.preventDefault();
+          switchUiMode('fab');
         }
       });
 
@@ -5169,36 +5379,19 @@
 
       try {
         if ($j) {
-          $j(window).on('resize.' + PFX, function () {
-            refreshTopbar();
-            applyUserSize();
-            applyPos();
-          });
+          $j(window).on('resize.' + PFX, function () { refreshTopbar(); applyUserSize(); applyPos(); });
         } else {
-          window.addEventListener('resize', function () {
-            refreshTopbar();
-            applyUserSize();
-            applyPos();
-          });
+          window.addEventListener('resize', function () { refreshTopbar(); applyUserSize(); applyPos(); });
         }
       } catch (_) {}
 
-      setTimeout(function () {
-        refreshTopbar();
-        applyPos();
-      }, 200);
+      setTimeout(function () { refreshTopbar(); applyPos(); }, 200);
+      setTimeout(function () { refreshTopbar(); applyPos(); }, 800);
+      setTimeout(function () { refreshTopbar(); applyPos(); }, 2000);
 
-      setTimeout(function () {
-        refreshTopbar();
-        applyPos();
-      }, 800);
-
-      setTimeout(function () {
-        refreshTopbar();
-        applyPos();
-      }, 2000);
+      info('RP Music Player started. uiMode=', uiMode, 'debug=', DEBUG);
     } catch (err) {
-      console.error('[RP_Player] init error:', err);
+      error('init error:', err);
     }
   }
 
