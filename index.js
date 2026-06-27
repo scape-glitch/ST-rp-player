@@ -4835,6 +4835,7 @@
       togglePlay();
       lockUntil = Date.now() + 150;
       return;
+    }
 
     if (lpTimer) {
       const tb = e.target && e.target.closest && e.target.closest('[data-themebtn]');
