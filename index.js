@@ -130,6 +130,12 @@
   let sizeExpandedW = 0, sizeExpandedH = 0, posX = -1, posY = -1;
   let sizeFabW = 0, sizeFabH = 0;
   let userW = 0, userH = 0;
+  let returnMiniX = -1;
+  let returnMiniY = -1;
+  let returnMiniW = 0;
+  let returnMiniH = 0;
+  let returnMiniMode = 'pill';
+
 
   let audioCurrentTime = 0;
   let audioDuration = 0;
@@ -332,40 +338,160 @@
     syncMiniAnchorFromRoot();
   }
 
+  function clearReturnMiniAnchor() {
+  returnMiniX = -1;
+  returnMiniY = -1;
+  returnMiniW = 0;
+  returnMiniH = 0;
+  returnMiniMode = 'pill';
+}
+
+function rememberReturnMiniFromRect(rect, mode) {
+  if (!rect) return;
+
+  returnMiniX = Math.round(rect.left);
+  returnMiniY = Math.round(rect.top);
+  returnMiniW = Math.round(rect.width || 0);
+  returnMiniH = Math.round(rect.height || 0);
+  returnMiniMode = mode || uiMode || 'pill';
+}
+
+function hasReturnMiniAnchor() {
+  return returnMiniX >= 0 && returnMiniY >= 0;
+}
+
+function clampXYForSize(x, y, w, h) {
+  const W = VW();
+  const H = VH();
+
+  const minX = 4;
+  const minY = TOPBAR;
+
+  const maxX = Math.max(minX, W - w - 4);
+  const maxY = Math.max(minY, H - h - 4);
+
+  return {
+    x: Math.round(Math.max(minX, Math.min(x, maxX))),
+    y: Math.round(Math.max(minY, Math.min(y, maxY)))
+  };
+}
+
+function panelPosFromMini(miniX, miniY, miniW, miniH, panelW, panelH) {
+  const W = VW();
+  const H = VH();
+
+  const minX = 4;
+  const minY = TOPBAR;
+
+  const maxX = Math.max(minX, W - panelW - 4);
+  const maxY = Math.max(minY, H - panelH - 4);
+
+  let x = miniX;
+  let y = miniY;
+
+  if (x + panelW > W - 4) {
+    x = miniX + miniW - panelW;
+  }
+
+  if (miniY + miniH + panelH > H - 4) {
+    y = miniY + miniH - panelH;
+  }
+
+  if (x < minX) x = minX;
+  if (x > maxX) x = maxX;
+  if (y < minY) y = minY;
+  if (y > maxY) y = maxY;
+
+  return {
+    x: Math.round(x),
+    y: Math.round(y)
+  };
+}
+
+
   function switchUiMode(newMode, sourceRect) {
-    if (newMode !== 'panel' && newMode !== 'pill' && newMode !== 'fab') return;
-    if (!root) {
-      uiMode = newMode;
-      syncCollapsed();
-      persistPosOnly();
-      return;
-    }
+  if (newMode !== 'panel' && newMode !== 'pill' && newMode !== 'fab') return;
 
-    const rect = sourceRect || root.getBoundingClientRect();
-    const x = Math.round(rect.left);
-    const y = Math.round(rect.top);
+  if (!root) {
+    uiMode = newMode;
+    syncCollapsed();
+    persistPosOnly();
+    return;
+  }
 
-    if (uiMode === 'panel') {
-      posExpandedX = x;
-      posExpandedY = y;
-    } else {
-      posCollapsedX = x;
-      posCollapsedY = y;
-      posFabX = x;
-      posFabY = y;
-    }
+  const oldMode = uiMode;
+  const oldCollapsed = oldMode !== 'panel';
 
+  const rect = sourceRect || root.getBoundingClientRect();
+  const x = Math.round(rect.left);
+  const y = Math.round(rect.top);
+  const w = Math.round(rect.width || 0);
+  const h = Math.round(rect.height || 0);
+
+  if (oldMode === 'panel') {
+    posExpandedX = x;
+    posExpandedY = y;
+  } else {
     posCollapsedX = x;
     posCollapsedY = y;
-
     posFabX = x;
     posFabY = y;
+  }
+
+  if (oldCollapsed && newMode === 'panel') {
+    rememberReturnMiniFromRect(rect, oldMode);
+
+    uiMode = 'panel';
+    syncCollapsed();
+
+    userW = sizeExpandedW || userW || 0;
+    userH = sizeExpandedH || userH || 0;
+
+    posX = x;
+    posY = y;
+
+    persistPosOnly();
+    render();
+
+    requestAnimationFrame(function () {
+      if (!root) return;
+
+      const nr = root.getBoundingClientRect();
+      const p = panelPosFromMini(
+        returnMiniX,
+        returnMiniY,
+        returnMiniW || w,
+        returnMiniH || h,
+        nr.width || root.offsetWidth || 260,
+        nr.height || root.offsetHeight || 300
+      );
+
+      posX = p.x;
+      posY = p.y;
+
+      applyPos();
+      savePos();
+    });
+
+    return;
+  }
+
+  if (oldMode === 'panel' && newMode !== 'panel') {
+    let tx = x;
+    let ty = y;
+
+    if (hasReturnMiniAnchor()) {
+      tx = returnMiniX;
+      ty = returnMiniY;
+    }
 
     posExpandedX = x;
     posExpandedY = y;
 
-    posX = x;
-    posY = y;
+    posCollapsedX = tx;
+    posCollapsedY = ty;
+    posFabX = tx;
+    posFabY = ty;
 
     uiMode = newMode;
     syncCollapsed();
@@ -373,16 +499,48 @@
     if (uiMode === 'fab') {
       userW = sizeFabW || 0;
       userH = sizeFabH || 0;
-    } else if (collapsed) {
+    } else {
       userW = sizeCollapsedW || 0;
       userH = sizeCollapsedH || 0;
-    } else {
-      userW = sizeExpandedW || userW || 0;
-      userH = sizeExpandedH || userH || 0;
     }
 
-    persistPosOnly();
+    posX = tx;
+    posY = ty;
 
+    persistPosOnly();
+    render();
+
+    requestAnimationFrame(function () {
+      applyUserSize();
+      applyPos();
+      savePos();
+      clearReturnMiniAnchor();
+    });
+
+    return;
+  }
+
+  if (oldCollapsed && newMode !== 'panel') {
+    posCollapsedX = x;
+    posCollapsedY = y;
+    posFabX = x;
+    posFabY = y;
+
+    uiMode = newMode;
+    syncCollapsed();
+
+    if (uiMode === 'fab') {
+      userW = sizeFabW || 0;
+      userH = sizeFabH || 0;
+    } else {
+      userW = sizeCollapsedW || 0;
+      userH = sizeCollapsedH || 0;
+    }
+
+    posX = x;
+    posY = y;
+
+    persistPosOnly();
     render();
 
     requestAnimationFrame(function () {
@@ -390,7 +548,25 @@
       applyPos();
       savePos();
     });
+
+    return;
   }
+
+  uiMode = newMode;
+  syncCollapsed();
+
+  posX = x;
+  posY = y;
+
+  persistPosOnly();
+  render();
+
+  requestAnimationFrame(function () {
+    applyUserSize();
+    applyPos();
+    savePos();
+  });
+}
 
   function switchCollapsedLinked(nextCollapsed, sourceRect) {
     switchUiMode(nextCollapsed ? 'pill' : 'panel', sourceRect);
@@ -3484,11 +3660,12 @@
   .${PFX}-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .${PFX}-glass { background: rgba(30,30,40,var(--rp-bg-alpha, 0.92)); backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%); border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 12px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.1); border-radius: 16px; overflow: hidden; }
 
-  .${PFX}-fab { width: 48px; height: 48px; border-radius: 50% !important; display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; background-clip: padding-box; }
-  .${PFX}-root.${PFX}-fabmode { border-radius: 50% !important; overflow: hidden; }
+  .${PFX}-fab { width: 48px; height: 48px; border-radius: 50% !important; display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; background-clip: padding-box; line-height: 0; }
+  .${PFX}-root.${PFX}-fabmode { border-radius: 50% !important; overflow: visible; }
   .${PFX}-root.${PFX}-fabmode, .${PFX}-root.${PFX}-fabmode .${PFX}-shell, .${PFX}-root.${PFX}-fabmode .${PFX}-body { border-radius: 50% !important; }
   .${PFX}-fab[data-handle] { cursor: grab; }
-  .${PFX}-fab .${PFX}-ic { width: 24px; height: 24px; pointer-events: none; }
+  .${PFX}-fab .${PFX}-ic { width: 24px; height: 24px; pointer-events: none; display: block; }
+  .${PFX}-fab[data-fabbtn] svg polygon { transform: translateX(1px); }
   .${PFX}-fab .${PFX}-spin { width: 22px; height: 22px; }
   .${PFX}-fab.vibe { background: var(--rp-accent, rgba(120,170,255,0.32)) !important; }
 
@@ -3707,7 +3884,24 @@
 
   .${PFX}-root[data-theme="neon"] .${PFX}-glass { background: rgba(10,10,18,var(--rp-bg-alpha, 1)); border: 1px solid var(--rp-accent, #ff2fd0); box-shadow: 0 0 8px var(--rp-accent, rgba(255,47,208,0.4)), 0 0 18px var(--rp-accent, rgba(255,47,208,0.15)); }
   .${PFX}-root[data-theme="glass"] .${PFX}-glass { background: rgba(255,255,255,var(--rp-bg-alpha, 0.08)); backdrop-filter: blur(22px) saturate(160%); -webkit-backdrop-filter: blur(22px) saturate(160%); border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 12px 40px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.18); }
-  .${PFX}-root[data-theme="neon"] .${PFX}-head-btn, .${PFX}-root[data-theme="neon"] .${PFX}-cbtn, .${PFX}-root[data-theme="neon"] .${PFX}-note-btn, .${PFX}-root[data-theme="neon"] .${PFX}-theme-btn, .${PFX}-root[data-theme="neon"] .${PFX}-pill-theme, .${PFX}-root[data-theme="neon"] .${PFX}-pill-icon { box-shadow: 0 0 6px var(--rp-accent, rgba(255,47,208,0.6)); }
+  .${PFX}-root[data-theme="neon"] .${PFX}-head-btn,
+  .${PFX}-root[data-theme="neon"] .${PFX}-cbtn,
+  .${PFX}-root[data-theme="neon"] .${PFX}-note-btn,
+  .${PFX}-root[data-theme="neon"] .${PFX}-theme-btn,
+  .${PFX}-root[data-theme="neon"] .${PFX}-pill-theme,
+  .${PFX}-root[data-theme="neon"] .${PFX}-pill-icon,
+  .${PFX}-root[data-theme="neon"] .${PFX}-fab {
+  box-shadow:
+    0 0 8px var(--rp-accent, rgba(255,47,208,0.75)),
+    0 0 18px var(--rp-accent, rgba(255,47,208,0.35));
+  }
+  .${PFX}-root[data-theme="neon"].${PFX}-fabmode .${PFX}-fab {
+  border: 1px solid var(--rp-accent, #ff2fd0);
+  box-shadow:
+    0 0 10px var(--rp-accent, rgba(255,47,208,0.85)),
+    0 0 24px var(--rp-accent, rgba(255,47,208,0.45)),
+    0 0 42px var(--rp-accent, rgba(255,47,208,0.22));
+}
   .${PFX}-root[data-theme="neon"] .${PFX}-ic { filter: drop-shadow(0 0 2px var(--rp-accent, rgba(255,47,208,0.7))); }
   .${PFX}-root[data-theme="paper"] .${PFX}-glass { background: rgba(244,236,216,var(--rp-bg-alpha, 1)); border: 1px solid #c9b48a; box-shadow: 0 4px 14px rgba(80,60,30,0.25); color: var(--rp-text, #3a2f1c); }
   .${PFX}-root[data-theme="paper"] { color: var(--rp-text, #3a2f1c); }
@@ -4762,57 +4956,6 @@
     if (fabLpTimer) { clearTimeout(fabLpTimer); fabLpTimer = null; }
   }
 
-  function switchUiMode(newMode, sourceRect) {
-    if (newMode !== 'panel' && newMode !== 'pill' && newMode !== 'fab') return;
-
-    if (!root) {
-      uiMode = newMode;
-      syncCollapsed();
-      persistPosOnly();
-      return;
-    }
-
-    const rect = sourceRect || root.getBoundingClientRect();
-    const x = Math.round(rect.left);
-    const y = Math.round(rect.top);
-
-    posCollapsedX = x;
-    posCollapsedY = y;
-
-    posFabX = x;
-    posFabY = y;
-
-    posExpandedX = x;
-    posExpandedY = y;
-
-    posX = x;
-    posY = y;
-
-    uiMode = newMode;
-    syncCollapsed();
-
-    if (uiMode === 'fab') {
-      userW = sizeFabW || 0;
-      userH = sizeFabH || 0;
-    } else if (collapsed) {
-      userW = sizeCollapsedW || 0;
-      userH = sizeCollapsedH || 0;
-    } else {
-      userW = sizeExpandedW || userW || 0;
-      userH = sizeExpandedH || userH || 0;
-    }
-
-    persistPosOnly();
-
-    render();
-
-    requestAnimationFrame(function () {
-      applyUserSize();
-      applyPos();
-      savePos();
-    });
-  }
-
   const INTER_SEL = '[data-find],[data-q],[data-play],[data-prev],[data-next],[data-stab],[data-src],[data-rplay],[data-pl],[data-qadd],[data-resplay],[data-resadd],[data-resclear],[data-restoggle],[data-more],[data-queuetoggle],[data-clearqueue],[data-rfind],[data-rchip],[data-rtab],[data-somamore],[data-radiotoggle],[data-libtoggle],[data-pltoggle],[data-searchtab],[data-rptab],[data-savemanual],[data-saverp],[data-loadm],[data-loadrp],[data-vol],[data-plnew],[data-pladd],[data-plpopclose],[data-swatch],[data-textswatch],[data-colorreset],[data-colorclose],[data-sizereset],[data-opacity],[data-editm],[data-editrp],[data-renm],[data-renrp],[data-trkdel],[data-pltrack],[data-editback],[data-delm],[data-delrp],[data-pledit],[data-pldel],[data-rfav],[data-rdelfav],[data-yteye],[data-ytclose],[data-expandfull],[data-quickvibe],[data-rptoggle],[data-rpnum],[data-rplang],[data-rpgenre],[data-rpsrc],[data-rpacc],[data-profsel],[data-profpick],[data-profpopclose],[data-cfg],[data-resize],[data-resize-left],[data-cancel-search],[data-cancel-rp],[data-link],[data-bgapplytheme],[data-bgapplyall],[data-bgdeltheme],[data-bgdelall],[data-textpick],[data-texthex],[data-textapplytheme],[data-textapplyall],[data-textdel],[data-solidtoggle],[data-solidlighttoggle],[data-soliddarkall],[data-solidlightall],[data-solidnoneall],[data-opapplytheme],[data-opapplyall],[data-bg-url],[data-bg-file],[data-colorpick],[data-colorhex],[data-progress-seek],[data-accentapplytheme],[data-accentapplyall],[data-accentdel],[data-acc],[data-favcur],[data-resfav],[data-qfav],[data-plfav],[data-loadfav],[data-editfav],[data-delfav],[data-favtrack],[data-favdel],[data-exportopen],[data-exportdo],[data-exportcancel],[data-confirmdel],[data-confirmcancel],[data-importbackup],[data-backup],[data-fullreset]';
 
   function onPointerDown(e) {
@@ -5080,12 +5223,19 @@
     moved = false;
     fromHandle = false;
 
-    if (wasMoved) {
-      savePos();
+if (wasMoved) {
+  savePos();
 
-      lockUntil = Date.now() + 400;
-      return;
-    }
+  if (uiMode === 'panel') {
+    clearReturnMiniAnchor();
+  } else {
+    syncMiniAnchorFromRoot();
+  }
+
+  lockUntil = Date.now() + 400;
+  return;
+}
+
 
     if (wasHandle) {
       if (Date.now() < lockUntil) return;
