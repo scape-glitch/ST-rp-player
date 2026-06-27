@@ -237,42 +237,163 @@
     userH = curSizeH();
   } catch (_) {}
 
-  function savePos() {
+  function persistPosOnly() {
     try {
-      if (root) {
-        const r = root.getBoundingClientRect();
-        if (uiMode === 'fab') {
-          posFabX = Math.round(r.left);
-          posFabY = Math.round(r.top);
-        } else if (collapsed) {
-          posCollapsedX = Math.round(r.left);
-          posCollapsedY = Math.round(r.top);
-        } else {
-          posExpandedX = Math.round(r.left);
-          posExpandedY = Math.round(r.top);
-        }
-      }
+      syncCollapsed();
+
       localStorage.setItem(LS_KEY, JSON.stringify({
         uiMode: uiMode,
         collapsed: collapsed,
+
         collapsedX: posCollapsedX,
         collapsedY: posCollapsedY,
+
         expandedX: posExpandedX,
         expandedY: posExpandedY
       }));
-      localStorage.setItem(LS_FAB, JSON.stringify({ x: posFabX, y: posFabY }));
-      posX = curPosX();
-      posY = curPosY();
-    } catch (e) { warn('savePos fail', e); }
+
+      localStorage.setItem(LS_FAB, JSON.stringify({
+        x: posFabX,
+        y: posFabY
+      }));
+    } catch (e) {
+      warn('persistPosOnly fail', e);
+    }
   }
 
   function persistUiMode() {
+    persistPosOnly();
+  }
+
+  function savePos() {
     try {
-      const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
-      s.uiMode = uiMode;
-      s.collapsed = collapsed;
-      localStorage.setItem(LS_KEY, JSON.stringify(s));
-    } catch (_) {}
+      if (!root) return;
+
+      syncCollapsed();
+
+      const r = root.getBoundingClientRect();
+      const x = Math.round(r.left);
+      const y = Math.round(r.top);
+
+      posX = x;
+      posY = y;
+
+      if (uiMode === 'fab') {
+        posFabX = x;
+        posFabY = y;
+
+        posCollapsedX = x;
+        posCollapsedY = y;
+      } else if (collapsed) {
+        posCollapsedX = x;
+        posCollapsedY = y;
+
+        posFabX = x;
+        posFabY = y;
+      } else {
+        posExpandedX = x;
+        posExpandedY = y;
+      }
+
+      persistPosOnly();
+    } catch (e) {
+      warn('savePos fail', e);
+    }
+  }
+
+  function syncMiniAnchorFromRect(rect) {
+    if (!rect) return;
+
+    const x = Math.round(rect.left);
+    const y = Math.round(rect.top);
+
+    posCollapsedX = x;
+    posCollapsedY = y;
+
+    posFabX = x;
+    posFabY = y;
+
+    posX = x;
+    posY = y;
+
+    persistPosOnly();
+  }
+
+  function syncCollapsedAnchorFromRect(rect) {
+    syncMiniAnchorFromRect(rect);
+  }
+
+  function syncMiniAnchorFromRoot() {
+    if (!root) return;
+    syncMiniAnchorFromRect(root.getBoundingClientRect());
+  }
+
+  function syncCollapsedAnchorFromRoot() {
+    syncMiniAnchorFromRoot();
+  }
+
+  function switchUiMode(newMode, sourceRect) {
+    if (newMode !== 'panel' && newMode !== 'pill' && newMode !== 'fab') return;
+    if (!root) {
+      uiMode = newMode;
+      syncCollapsed();
+      persistPosOnly();
+      return;
+    }
+
+    const rect = sourceRect || root.getBoundingClientRect();
+    const x = Math.round(rect.left);
+    const y = Math.round(rect.top);
+
+    if (uiMode === 'panel') {
+      posExpandedX = x;
+      posExpandedY = y;
+    } else {
+      posCollapsedX = x;
+      posCollapsedY = y;
+      posFabX = x;
+      posFabY = y;
+    }
+
+    posCollapsedX = x;
+    posCollapsedY = y;
+
+    posFabX = x;
+    posFabY = y;
+
+    posExpandedX = x;
+    posExpandedY = y;
+
+    posX = x;
+    posY = y;
+
+    uiMode = newMode;
+    syncCollapsed();
+
+    if (uiMode === 'fab') {
+      userW = sizeFabW || 0;
+      userH = sizeFabH || 0;
+    } else if (collapsed) {
+      userW = sizeCollapsedW || 0;
+      userH = sizeCollapsedH || 0;
+    } else {
+      userW = sizeExpandedW || userW || 0;
+      userH = sizeExpandedH || userH || 0;
+    }
+
+    persistPosOnly();
+
+    render();
+
+    requestAnimationFrame(function () {
+      applyUserSize();
+      applyPos();
+      savePos();
+    });
+  }
+
+  function switchCollapsedLinked(nextCollapsed, sourceRect) {
+    switchUiMode(nextCollapsed ? 'pill' : 'panel', sourceRect);
   }
 
   let $j;
@@ -4573,21 +4694,60 @@
 
   function applyPos() {
     if (!root) return;
-    const w = root.offsetWidth || 110, h = root.offsetHeight || 46;
-    const W = VW(), H = VH();
+
+    const w = root.offsetWidth || 110;
+    const h = root.offsetHeight || 46;
+
+    const W = VW();
+    const H = VH();
+
+    const minX = 4;
     const minY = TOPBAR;
+
     if (posX < 0 || posY < 0) {
-      posX = Math.max(8, W - w - 12);
-      posY = Math.max(minY + 14, H - h - 80);
+      let sx = -1;
+      let sy = -1;
+
+      if (uiMode === 'fab') {
+        sx = posFabX;
+        sy = posFabY;
+
+        if (sx < 0 || sy < 0) {
+          sx = posCollapsedX;
+          sy = posCollapsedY;
+        }
+      } else if (collapsed) {
+        sx = posCollapsedX;
+        sy = posCollapsedY;
+
+        if (sx < 0 || sy < 0) {
+          sx = posFabX;
+          sy = posFabY;
+        }
+      } else {
+        sx = posExpandedX;
+        sy = posExpandedY;
+      }
+
+      if (typeof sx === 'number' && sx >= 0 && typeof sy === 'number' && sy >= 0) {
+        posX = sx;
+        posY = sy;
+      } else {
+        posX = Math.max(8, W - w - 12);
+        posY = Math.max(minY + 14, H - h - 80);
+      }
     }
-    const maxX = W - w - 4, maxY = H - h - 4;
-    if (posX < 4) posX = 4;
-    if (maxX > 4 && posX > maxX) posX = maxX;
-    if (posY < minY) posY = minY;
-    if (maxY > minY && posY > maxY) posY = maxY;
-    root.style.left = posX + 'px';
-    root.style.top = posY + 'px';
+
+    const maxX = Math.max(minX, W - w - 4);
+    const maxY = Math.max(minY, H - h - 4);
+
+    posX = Math.max(minX, Math.min(posX, maxX));
+    posY = Math.max(minY, Math.min(posY, maxY));
+
+    root.style.left = Math.round(posX) + 'px';
+    root.style.top = Math.round(posY) + 'px';
   }
+
 
   let down = false, moved = false, fromHandle = false, sx = 0, sy = 0, bl = 0, bt = 0, bw = 0, bh = 0, lockUntil = 0;
   let lpTimer = null, lpFired = false;
@@ -4602,63 +4762,55 @@
     if (fabLpTimer) { clearTimeout(fabLpTimer); fabLpTimer = null; }
   }
 
-  function switchUiMode(newMode) {
-    if (newMode === uiMode) return;
-    syncCollapsed();
+  function switchUiMode(newMode, sourceRect) {
+    if (newMode !== 'panel' && newMode !== 'pill' && newMode !== 'fab') return;
 
-    let prevCenterX = null, prevCenterY = null;
-    try {
-      if (root) {
-        const r = root.getBoundingClientRect();
-        prevCenterX = r.left + r.width / 2;
-        prevCenterY = r.top + r.height / 2;
-        if (uiMode === 'fab') { posFabX = Math.round(r.left); posFabY = Math.round(r.top); }
-        else if (collapsed) { posCollapsedX = Math.round(r.left); posCollapsedY = Math.round(r.top); }
-        else { posExpandedX = Math.round(r.left); posExpandedY = Math.round(r.top); }
-      }
-    } catch (_) {}
+    if (!root) {
+      uiMode = newMode;
+      syncCollapsed();
+      persistPosOnly();
+      return;
+    }
 
-    const fromFab = (uiMode === 'fab');
-    const toFab = (newMode === 'fab');
+    const rect = sourceRect || root.getBoundingClientRect();
+    const x = Math.round(rect.left);
+    const y = Math.round(rect.top);
+
+    posCollapsedX = x;
+    posCollapsedY = y;
+
+    posFabX = x;
+    posFabY = y;
+
+    posExpandedX = x;
+    posExpandedY = y;
+
+    posX = x;
+    posY = y;
 
     uiMode = newMode;
     syncCollapsed();
-    userW = curSizeW() || userW;
-    userH = curSizeH() || userH;
 
-    const savedX = curPosX(), savedY = curPosY();
-    persistUiMode();
-    render();
-
-    const W = VW(), H = VH();
-    const minX = 4, minY = TOPBAR;
-    const newRect = root.getBoundingClientRect();
-    const maxX_new = Math.max(minX, W - newRect.width - 4);
-    const maxY_new = Math.max(minY, H - newRect.height - 4);
-
-    let nx, ny;
-
-    if ((fromFab || toFab) && prevCenterX !== null) {
-      nx = Math.round(prevCenterX - newRect.width / 2);
-      ny = Math.round(prevCenterY - newRect.height / 2);
-    } else if (savedX >= 0 && savedY >= 0) {
-      nx = savedX;
-      ny = savedY;
+    if (uiMode === 'fab') {
+      userW = sizeFabW || 0;
+      userH = sizeFabH || 0;
+    } else if (collapsed) {
+      userW = sizeCollapsedW || 0;
+      userH = sizeCollapsedH || 0;
     } else {
-      nx = Math.round(prevCenterX - newRect.width / 2);
-      ny = Math.round(prevCenterY - newRect.height / 2);
+      userW = sizeExpandedW || userW || 0;
+      userH = sizeExpandedH || userH || 0;
     }
 
-    if (nx < minX) nx = minX;
-    if (nx > maxX_new) nx = maxX_new;
-    if (ny < minY) ny = minY;
-    if (ny > maxY_new) ny = maxY_new;
+    persistPosOnly();
 
-    posX = nx;
-    posY = ny;
+    render();
 
-    applyPos();
-    savePos();
+    requestAnimationFrame(function () {
+      applyUserSize();
+      applyPos();
+      savePos();
+    });
   }
 
   const INTER_SEL = '[data-find],[data-q],[data-play],[data-prev],[data-next],[data-stab],[data-src],[data-rplay],[data-pl],[data-qadd],[data-resplay],[data-resadd],[data-resclear],[data-restoggle],[data-more],[data-queuetoggle],[data-clearqueue],[data-rfind],[data-rchip],[data-rtab],[data-somamore],[data-radiotoggle],[data-libtoggle],[data-pltoggle],[data-searchtab],[data-rptab],[data-savemanual],[data-saverp],[data-loadm],[data-loadrp],[data-vol],[data-plnew],[data-pladd],[data-plpopclose],[data-swatch],[data-textswatch],[data-colorreset],[data-colorclose],[data-sizereset],[data-opacity],[data-editm],[data-editrp],[data-renm],[data-renrp],[data-trkdel],[data-pltrack],[data-editback],[data-delm],[data-delrp],[data-pledit],[data-pldel],[data-rfav],[data-rdelfav],[data-yteye],[data-ytclose],[data-expandfull],[data-quickvibe],[data-rptoggle],[data-rpnum],[data-rplang],[data-rpgenre],[data-rpsrc],[data-rpacc],[data-profsel],[data-profpick],[data-profpopclose],[data-cfg],[data-resize],[data-resize-left],[data-cancel-search],[data-cancel-rp],[data-link],[data-bgapplytheme],[data-bgapplyall],[data-bgdeltheme],[data-bgdelall],[data-textpick],[data-texthex],[data-textapplytheme],[data-textapplyall],[data-textdel],[data-solidtoggle],[data-solidlighttoggle],[data-soliddarkall],[data-solidlightall],[data-solidnoneall],[data-opapplytheme],[data-opapplyall],[data-bg-url],[data-bg-file],[data-colorpick],[data-colorhex],[data-progress-seek],[data-accentapplytheme],[data-accentapplyall],[data-accentdel],[data-acc],[data-favcur],[data-resfav],[data-qfav],[data-plfav],[data-loadfav],[data-editfav],[data-delfav],[data-favtrack],[data-favdel],[data-exportopen],[data-exportdo],[data-exportcancel],[data-confirmdel],[data-confirmcancel],[data-importbackup],[data-backup],[data-fullreset]';
@@ -4669,24 +4821,48 @@
     const fabBtn = target.closest('[data-fabbtn]');
     if (fabBtn && uiMode === 'fab') {
       if (e.button === 2) return;
+
       fabLpFired = false;
       clearFabLongPress();
-      down = true; moved = false; fromHandle = true;
+
+      down = true;
+      moved = false;
+      fromHandle = true;
+
       activePointerId = e.pointerId;
-      sx = e.clientX; sy = e.clientY;
-      fabDownX = e.clientX; fabDownY = e.clientY;
+
+      sx = e.clientX;
+      sy = e.clientY;
+
+      fabDownX = e.clientX;
+      fabDownY = e.clientY;
+
       const rect = root.getBoundingClientRect();
-      bl = rect.left; bt = rect.top; bw = rect.width; bh = rect.height;
+      bl = rect.left;
+      bt = rect.top;
+      bw = rect.width;
+      bh = rect.height;
+
       try { fabBtn.setPointerCapture(e.pointerId); } catch (_) {}
+
       fabLpTimer = setTimeout(function () {
         fabLpFired = true;
         clearFabLongPress();
+
         try { if (navigator.vibrate) navigator.vibrate(15); } catch (_) {}
+
         down = false;
+        moved = false;
+        fromHandle = false;
+
         root.classList.remove('dragging');
+
+        syncMiniAnchorFromRoot();
         switchUiMode('panel');
+
         lockUntil = Date.now() + 450;
       }, 500);
+
       return;
     }
 
@@ -4725,15 +4901,23 @@
     if (fabSource && collapsed && uiMode !== 'fab') {
       lpFired = false;
       clearLongPress();
-      sx = e.clientX; sy = e.clientY;
+
+      sx = e.clientX;
+      sy = e.clientY;
+
       lpTimer = setTimeout(function () {
         lpFired = true;
         clearLongPress();
+
         try { if (navigator.vibrate) navigator.vibrate(15); } catch (_) {}
+
+        syncMiniAnchorFromRoot();
         switchUiMode('fab');
+
         lockUntil = Date.now() + 450;
       }, 500);
     }
+
 
     if (target.closest(INTER_SEL)) return;
 
@@ -4806,42 +4990,58 @@
     if (activePointerId !== null && e.pointerId !== activePointerId) return;
 
     if (resizing) {
-      resizing = false; leftResize = false;
+      resizing = false;
+      leftResize = false;
       root.classList.remove('resizing');
       activePointerId = null;
+
       saveSize();
+      savePos();
+
       lockUntil = Date.now() + 250;
       return;
     }
 
-    const wasFabBtn = e.target && e.target.closest && e.target.closest('[data-fabbtn]');
-    if (uiMode === 'fab' && (fabLpTimer || wasFabBtn) && fromHandle) {
+    /**
+     * FAB long-press:
+     * если long-press уже сработал — он сам переключил режим,
+     * на pointerup больше ничего не делаем.
+     */
+    if (fabLpTimer) {
       clearFabLongPress();
-      const wasMoved = moved;
-      down = false; moved = false; fromHandle = false;
-      root.classList.remove('dragging');
-      activePointerId = null;
 
-      if (fabLpFired) { lockUntil = Date.now() + 450; return; }
-      if (wasMoved) { savePos(); lockUntil = Date.now() + 400; return; }
-
-      const fb = e.target.closest('[data-fabbtn]');
-      if (fb && fb.getAttribute('data-fabvibe')) {
-        clearRpPulse();
-        rpQuickVibe();
-        lockUntil = Date.now() + 150;
+      if (fabLpFired) {
+        fabLpFired = false;
+        down = false;
+        moved = false;
+        fromHandle = false;
+        root.classList.remove('dragging');
+        activePointerId = null;
+        lockUntil = Date.now() + 350;
         return;
       }
-      togglePlay();
-      lockUntil = Date.now() + 150;
-      return;
     }
 
+    /**
+     * Общий long-press:
+     * - themebtn короткий тап = смена темы
+     * - fabsource короткий тап = play/pause
+     * - long-press уже обработан в timer
+     */
     if (lpTimer) {
-      const tb = e.target && e.target.closest && e.target.closest('[data-themebtn]');
-      const isFabSource = e.target && e.target.closest && e.target.closest('[data-fabsource]');
       clearLongPress();
-      if (tb && !lpFired) {
+
+      const tb = e.target && e.target.closest && e.target.closest('[data-themebtn]');
+      const fs = e.target && e.target.closest && e.target.closest('[data-fabsource]');
+
+      if (lpFired) {
+        lpFired = false;
+        activePointerId = null;
+        lockUntil = Date.now() + 350;
+        return;
+      }
+
+      if (tb) {
         if (Date.now() >= lockUntil) {
           theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
           saveTheme();
@@ -4849,42 +5049,69 @@
           render();
           lockUntil = Date.now() + 600;
         }
+
         activePointerId = null;
-        lockUntil = Date.now() + 600;
         return;
       }
-      if (isFabSource && !lpFired) {
-        clearLongPress();
-      } else {
+
+      if (fs) {
+        togglePlay();
         activePointerId = null;
-        lockUntil = Date.now() + 600;
+        lockUntil = Date.now() + 300;
         return;
       }
+
+      activePointerId = null;
+      return;
     }
 
-    if (!down) { activePointerId = null; return; }
+    if (!down) {
+      activePointerId = null;
+      return;
+    }
 
     down = false;
     root.classList.remove('dragging');
     activePointerId = null;
 
-    const wasMoved = moved, wasHandle = fromHandle;
-    moved = false; fromHandle = false;
+    const wasMoved = moved;
+    const wasHandle = fromHandle;
 
-    if (wasMoved) { savePos(); lockUntil = Date.now() + 400; return; }
+    moved = false;
+    fromHandle = false;
+
+    if (wasMoved) {
+      savePos();
+
+      lockUntil = Date.now() + 400;
+      return;
+    }
 
     if (wasHandle) {
       if (Date.now() < lockUntil) return;
       if (e && e.cancelable) e.preventDefault();
-      lockUntil = Date.now() + 400;
 
-      const isFabSource = e.target && e.target.closest && e.target.closest('[data-fabsource]');
-      if (isFabSource) {
-        togglePlay();
+      if (uiMode === 'fab') {
+        const fb = e.target && e.target.closest && e.target.closest('[data-fabbtn]');
+        if (fb && fb.getAttribute('data-fabvibe')) {
+          clearRpPulse();
+          rpQuickVibe();
+        } else {
+          togglePlay();
+        }
+
+        lockUntil = Date.now() + 300;
         return;
       }
 
-      switchUiMode(collapsed ? 'panel' : 'pill');
+      if (uiMode === 'panel') {
+        switchUiMode('pill');
+      } else {
+        switchUiMode('panel');
+      }
+
+      lockUntil = Date.now() + 400;
+      return;
     }
   }
 
@@ -4991,7 +5218,12 @@
     if (t.closest('[data-quickvibe]')) { clearRpPulse(); rpQuickVibe(); lockUntil = Date.now() + 300; return; }
     if (t.closest('[data-yteye]')) { ytHidden = !ytHidden; applyEyeState(); return; }
     if (t.closest('[data-ytclose]')) { closeYt(); return; }
-    if (t.closest('[data-expandfull]')) { switchUiMode('panel'); clearRpPulse(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-expandfull]')) {
+      clearRpPulse();
+      switchUiMode('panel');
+      lockUntil = Date.now() + 300;
+      return;
+    }
 
     if (t.closest('[data-themebtn]')) {
       if (e.pointerType === 'mouse' || !e.pointerType) {
@@ -5139,11 +5371,21 @@
     if (t.closest('[data-cancel-rp]')) { cancelRp(); lockUntil = Date.now() + 300; return; }
 
     if (t.closest('[data-notebtn]')) {
-      if (moved) { lockUntil = Date.now() + 300; return; }
-      switchUiMode('pill');
+      if (moved) {
+        lockUntil = Date.now() + 300;
+        return;
+      }
+
+      if (uiMode === 'panel') {
+        switchUiMode('pill');
+      } else {
+        switchUiMode('panel');
+      }
+
       lockUntil = Date.now() + 300;
       return;
     }
+
 
     if (t.closest('[data-libtoggle]')) { libOpen = !libOpen; if (libOpen) { searchOpen = false; radioOpen = false; rpOpen = false; plOpen = false; editId = null; editKind = null; exportPop = null; } render(); lockUntil = Date.now() + 300; return; }
     if (t.closest('[data-pltoggle]')) { plOpen = !plOpen; if (plOpen) { searchOpen = false; radioOpen = false; rpOpen = false; libOpen = false; } render(); lockUntil = Date.now() + 300; return; }
@@ -5394,12 +5636,18 @@
         const fb = e.target && e.target.closest && e.target.closest('[data-fabbtn]');
         if (fb && uiMode === 'fab') {
           e.preventDefault();
+
+          syncMiniAnchorFromRoot();
           switchUiMode('panel');
+
           return;
         }
+
         const fs = e.target && e.target.closest && e.target.closest('[data-fabsource]');
         if (fs && collapsed && uiMode !== 'fab') {
           e.preventDefault();
+
+          syncMiniAnchorFromRoot();
           switchUiMode('fab');
         }
       });
