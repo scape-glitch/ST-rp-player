@@ -2203,7 +2203,17 @@
       return;
     }
 
-    if (isYtTrack(t) || isProbablyYtBacked(t) || !audio.src) {
+    if (audio.src && audio.readyState >= 2 && !isYtTrack(t)) {
+      audio.play().then(function () {
+        isPlaying = true;
+        updatePlayBtn();
+      }).catch(function () {
+        playIndex(curIdx);
+      });
+      return;
+    }
+
+    if (isYtTrack(t) || !audio.src) {
       playIndex(curIdx);
       return;
     }
@@ -2737,7 +2747,14 @@
 
     let avoidReq = '';
     if (avoidList && avoidList.length) {
-      avoidReq = '\nDO NOT REPEAT these exact artist+track pairs. Repeating an artist is allowed ONLY if the track title is different:\n' +
+      avoidReq = '\n=== EXCLUSION LIST (already used ARTIST + TRACK pairs) ===\n' +
+        'The list below contains specific SONGS in the format "Artist — Title".\n' +
+        'These are NOT banned artists. The artist is NOT forbidden — only this EXACT combination of artist AND that specific title is forbidden.\n' +
+        'RULES:\n' +
+        '- You MUST NOT output any song whose artist AND title both match an entry below.\n' +
+        '- You MAY freely reuse an artist from this list, as long as you pick a DIFFERENT song (different title) by that artist.\n' +
+        '- Same artist + different track = ALLOWED. Same artist + same track = FORBIDDEN.\n' +
+        'Forbidden artist+track pairs:\n' +
         avoidList.map(function (x) { return '- ' + x; }).join('\n') + '\n';
     }
 
@@ -2752,8 +2769,7 @@
       '- Only REAL, existing tracks (artist + title), findable on YouTube or major music sources. Never invent tracks.\n' +
       '- ONLY actual songs or instrumental pieces. NEVER jingles, ringtones, sound effects, ad music, memes, children songs, novelty audio.\n' +
       '- Emotional tone of the track MUST match the scene (dramatic=intense, sad=melancholic, tense=dark, romantic=tender).\n' +
-      '- You MAY repeat an artist if the track title is different.\n' +
-      '- You MUST NOT repeat the exact same artist + track pair from the exclusion list.\n' +
+      '- An ARTIST may appear multiple times across suggestions, AS LONG AS each track title is different. Repeating an artist is fine; repeating the exact same artist+title pair is not.\n' +
       genreReq +
       (lang ? '- REMINDER: ALL tracks MUST be in ' + lang + '. No exceptions.\n' : '') +
       favReq +
@@ -3347,7 +3363,9 @@
   .${PFX}-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .${PFX}-glass { background: rgba(30,30,40,var(--rp-bg-alpha, 0.92)); backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%); border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 12px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.1); border-radius: 16px; overflow: hidden; }
 
-  .${PFX}-fab { width: 54px; height: 54px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .${PFX}-fab { width: 48px; height: 48px; border-radius: 50% !important; display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; background-clip: padding-box; }
+  .${PFX}-root.${PFX}-fabmode { border-radius: 50% !important; overflow: hidden; }
+  .${PFX}-root.${PFX}-fabmode, .${PFX}-root.${PFX}-fabmode .${PFX}-shell, .${PFX}-root.${PFX}-fabmode .${PFX}-body { border-radius: 50% !important; }
   .${PFX}-fab[data-handle] { cursor: grab; }
   .${PFX}-fab .${PFX}-ic { width: 24px; height: 24px; pointer-events: none; }
   .${PFX}-fab .${PFX}-spin { width: 22px; height: 22px; }
@@ -3932,7 +3950,8 @@
     if (!lib.favorites.length) h += '<div class="' + PFX + '-empty">Лайкните трек ♥, чтобы создать</div>';
     else {
       h += '<div class="' + PFX + '-row" data-loadfav="1">' +
-        '<div class="' + PFX + '-row-meta"><div class="' + PFX + '-row-t">' + ICONS.heartFill + ' Избранное</div><div class="' + PFX + '-row-a">' + lib.favorites.length + ' треков</div></div>' +
+        '<span class="' + PFX + '-row-fav" style="opacity:1;pointer-events:none;">' + ICONS.heartFill + '</span>' +
+        '<div class="' + PFX + '-row-meta"><div class="' + PFX + '-row-t">Избранное</div><div class="' + PFX + '-row-a">' + lib.favorites.length + ' треков</div></div>' +
         '<span class="' + PFX + '-row-act" data-editfav="1">' + ICONS.list + '</span>' +
         '<span class="' + PFX + '-row-act" data-delfav="1">' + ICONS.close + '</span>' +
       '</div>';
@@ -4444,7 +4463,7 @@
     if (cp) cp.scrollTop = scrollMemory.colorpop || 0;
   }
 
-  function render() {
+    function render() {
     if (!shell) return;
     syncCollapsed();
     refreshTopbar();
@@ -4463,6 +4482,8 @@
     const cur = curTrack();
     const ytNow = isYtTrack(cur) && ytCurrentEmbed;
     root.setAttribute('data-theme', theme);
+    if (uiMode === 'fab') root.classList.add(PFX + '-fabmode');
+    else root.classList.remove(PFX + '-fabmode');
     applyAccentVar();
     applyTextColorVar();
     applySolidClass();
@@ -4585,23 +4606,20 @@
     if (newMode === uiMode) return;
     syncCollapsed();
 
+    let prevCenterX = null, prevCenterY = null;
     try {
       if (root) {
         const r = root.getBoundingClientRect();
+        prevCenterX = r.left + r.width / 2;
+        prevCenterY = r.top + r.height / 2;
         if (uiMode === 'fab') { posFabX = Math.round(r.left); posFabY = Math.round(r.top); }
         else if (collapsed) { posCollapsedX = Math.round(r.left); posCollapsedY = Math.round(r.top); }
         else { posExpandedX = Math.round(r.left); posExpandedY = Math.round(r.top); }
       }
     } catch (_) {}
 
-    const prevRect = root.getBoundingClientRect();
-    const W = VW(), H = VH();
-    const minX = 4, maxX_old = Math.max(0, W - prevRect.width - 4);
-    const minY = TOPBAR, maxY_old = Math.max(0, H - prevRect.height - 4);
-
-    let ratioX = 0, ratioY = 0;
-    if (maxX_old > minX) { ratioX = (prevRect.left - minX) / (maxX_old - minX); ratioX = Math.max(0, Math.min(1, ratioX)); }
-    if (maxY_old > minY) { ratioY = (prevRect.top - minY) / (maxY_old - minY); ratioY = Math.max(0, Math.min(1, ratioY)); }
+    const fromFab = (uiMode === 'fab');
+    const toFab = (newMode === 'fab');
 
     uiMode = newMode;
     syncCollapsed();
@@ -4612,17 +4630,32 @@
     persistUiMode();
     render();
 
+    const W = VW(), H = VH();
+    const minX = 4, minY = TOPBAR;
     const newRect = root.getBoundingClientRect();
-    const maxX_new = Math.max(0, W - newRect.width - 4);
-    const maxY_new = Math.max(0, H - newRect.height - 4);
+    const maxX_new = Math.max(minX, W - newRect.width - 4);
+    const maxY_new = Math.max(minY, H - newRect.height - 4);
 
-    if (savedX >= 0 && savedY >= 0) {
-      posX = savedX;
-      posY = savedY;
+    let nx, ny;
+
+    if ((fromFab || toFab) && prevCenterX !== null) {
+      nx = Math.round(prevCenterX - newRect.width / 2);
+      ny = Math.round(prevCenterY - newRect.height / 2);
+    } else if (savedX >= 0 && savedY >= 0) {
+      nx = savedX;
+      ny = savedY;
     } else {
-      posX = minX + ratioX * (maxX_new - minX);
-      posY = minY + ratioY * (maxY_new - minY);
+      nx = Math.round(prevCenterX - newRect.width / 2);
+      ny = Math.round(prevCenterY - newRect.height / 2);
     }
+
+    if (nx < minX) nx = minX;
+    if (nx > maxX_new) nx = maxX_new;
+    if (ny < minY) ny = minY;
+    if (ny > maxY_new) ny = maxY_new;
+
+    posX = nx;
+    posY = ny;
 
     applyPos();
     savePos();
@@ -4796,13 +4829,12 @@
       if (fb && fb.getAttribute('data-fabvibe')) {
         clearRpPulse();
         rpQuickVibe();
-        lockUntil = Date.now() + 300;
+        lockUntil = Date.now() + 150;
         return;
       }
       togglePlay();
-      lockUntil = Date.now() + 300;
+      lockUntil = Date.now() + 150;
       return;
-    }
 
     if (lpTimer) {
       const tb = e.target && e.target.closest && e.target.closest('[data-themebtn]');
