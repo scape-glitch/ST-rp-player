@@ -3288,6 +3288,8 @@
   async function runRpAnalysis(count, msgCount, mode) {
     if (rpBusy) return;
 
+    const runId = ++rpRunId;
+
     rpBusy = true;
     searching = true;
 
@@ -3296,32 +3298,45 @@
     statusMsg = isMemeGenre() ? 'ИИ подбирает мемные звуки…' : 'ИИ подбирает музыку…';
     resultsRp = true;
     results = [];
-    rpAbortController = new AbortController();
+
+    const controller = new AbortController();
+    rpAbortController = controller;
+
     render();
 
     try {
       const messages = getRecentMessages(msgCount);
+
+      if (runId !== rpRunId || controller.signal.aborted) return;
+
       if (!messages.length) {
-        statusMsg = 'Нет сообщений для анализа';
-        rpBusy = false;
-        searching = false;
-        rpAbortController = null;
-        render();
+        if (runId === rpRunId) {
+          statusMsg = 'Нет сообщений для анализа';
+          rpBusy = false;
+          searching = false;
+          if (rpAbortController === controller) rpAbortController = null;
+          render();
+        }
         return;
       }
 
       const avoid = getRpAvoidSigs();
       const prompt = buildRpPrompt(count, messages, avoid);
       const raw = await callModel(prompt);
+
+      if (runId !== rpRunId || controller.signal.aborted) return;
+
       const picks = parseRpJson(raw);
 
       if (!picks.length) {
-        statusMsg = 'ИИ не вернул треки (проверьте профиль)';
-        warn('RP: parsed 0 tracks. raw len=', (raw || '').length);
-        rpBusy = false;
-        searching = false;
-        rpAbortController = null;
-        render();
+        if (runId === rpRunId) {
+          statusMsg = 'ИИ не вернул треки (проверьте профиль)';
+          warn('RP: parsed 0 tracks. raw len=', (raw || '').length);
+          rpBusy = false;
+          searching = false;
+          if (rpAbortController === controller) rpAbortController = null;
+          render();
+        }
         return;
       }
 
@@ -3334,13 +3349,18 @@
       const found = [];
 
       for (let i = 0; i < picks.length; i++) {
+        if (runId !== rpRunId || controller.signal.aborted) return;
+
         const p = picks[i];
         const sig = rpTrackSigFromParts(p.artist, p.track);
 
         if (sig && usedSigs.indexOf(sig) >= 0) continue;
 
         try {
-          const r = await findTrackForRp(p.artist + ' — ' + p.track, rpAbortController, usedSigs);
+          const r = await findTrackForRp(p.artist + ' — ' + p.track, controller, usedSigs);
+
+          if (runId !== rpRunId || controller.signal.aborted) return;
+
           if (r) {
             r.why = p.why;
             r._rpSuggestedChat = getChatId();
@@ -3354,6 +3374,8 @@
           warn('RP find track error', e);
         }
       }
+
+      if (runId !== rpRunId || controller.signal.aborted) return;
 
       results = found.filter(Boolean);
       render();
@@ -3369,17 +3391,29 @@
         }
       }
     } catch (e) {
-      if (e.message === 'aborted') statusMsg = 'Операция отменена';
-      else { statusMsg = 'Ошибка ИИ: ' + (e && e.message ? e.message : 'unknown'); error('RP analysis error', e); }
+      if (runId === rpRunId) {
+        if (e.message === 'aborted') statusMsg = 'Операция отменена';
+        else {
+          statusMsg = 'Ошибка ИИ: ' + (e && e.message ? e.message : 'unknown');
+          error('RP analysis error', e);
+        }
+      }
     }
 
-    rpBusy = false;
-    searching = false;
-    rpAbortController = null;
-    render();
+    if (runId === rpRunId) {
+      rpBusy = false;
+      searching = false;
+      if (rpAbortController === controller) rpAbortController = null;
+      render();
+    }
   }
 
   function rpQuickVibe() {
+    if (rpBusy || searching || rpAbortController || searchAbortController) {
+      cancelBusyOps('Операция отменена');
+      return;
+    }
+
     if (!cfg.rpQuick) {
       if (!collapsed) {
         rpOpen = true;
@@ -3388,6 +3422,7 @@
       render();
       return;
     }
+
     runRpAnalysis(1, 3, 'quick');
   }
 
@@ -3397,14 +3432,7 @@
   }
 
   function cancelRp() {
-    if (rpAbortController) {
-      rpAbortController.abort();
-      rpAbortController = null;
-    }
-    rpBusy = false;
-    searching = false;
-    statusMsg = 'Операция отменена';
-    render();
+    cancelBusyOps('Операция отменена');
   }
 
   let rpMsgCounter = 0;
@@ -5103,21 +5131,97 @@
   }
 
 
+  const MODE_LONG_PRESS_MS = 750;
+  const MODE_SWITCH_COOLDOWN_MS = 950;
+  const MODE_MOVE_CANCEL_PX = 12;
+
   let down = false, moved = false, fromHandle = false, sx = 0, sy = 0, bl = 0, bt = 0, bw = 0, bh = 0, lockUntil = 0;
   let lpTimer = null, lpFired = false;
   let activePointerId = null;
   let resizing = false, rsx = 0, rsy = 0, rsW = 0, rsH = 0, leftResize = false, startLeft = 0;
   let fabLpTimer = null, fabLpFired = false, fabDownX = 0, fabDownY = 0;
   let noteLpTimer = null, noteLpFired = false, noteDownX = 0, noteDownY = 0;
+  let modeGestureGuardUntil = 0;
+  let modeGestureWaitRelease = false;
+  let modeGestureReleaseBound = false;
+  let rpRunId = 0;
 
   function clearLongPress() {
     if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
   }
+
   function clearFabLongPress() {
     if (fabLpTimer) { clearTimeout(fabLpTimer); fabLpTimer = null; }
   }
+
   function clearNoteLongPress() {
     if (noteLpTimer) { clearTimeout(noteLpTimer); noteLpTimer = null; }
+  }
+
+  function endModeGestureGuard() {
+    modeGestureWaitRelease = false;
+
+    if (modeGestureReleaseBound) {
+      modeGestureReleaseBound = false;
+      try { window.removeEventListener('pointerup', endModeGestureGuard, true); } catch (_) {}
+      try { window.removeEventListener('pointercancel', endModeGestureGuard, true); } catch (_) {}
+      try { window.removeEventListener('mouseup', endModeGestureGuard, true); } catch (_) {}
+      try { window.removeEventListener('touchend', endModeGestureGuard, true); } catch (_) {}
+      try { window.removeEventListener('touchcancel', endModeGestureGuard, true); } catch (_) {}
+    }
+  }
+
+  function bindModeGestureRelease() {
+    if (modeGestureReleaseBound) return;
+
+    modeGestureReleaseBound = true;
+    try { window.addEventListener('pointerup', endModeGestureGuard, true); } catch (_) {}
+    try { window.addEventListener('pointercancel', endModeGestureGuard, true); } catch (_) {}
+    try { window.addEventListener('mouseup', endModeGestureGuard, true); } catch (_) {}
+    try { window.addEventListener('touchend', endModeGestureGuard, true); } catch (_) {}
+    try { window.addEventListener('touchcancel', endModeGestureGuard, true); } catch (_) {}
+  }
+
+  function armModeGestureGuard(ms) {
+    modeGestureGuardUntil = Date.now() + (ms || MODE_SWITCH_COOLDOWN_MS);
+    modeGestureWaitRelease = true;
+    lockUntil = Math.max(lockUntil, modeGestureGuardUntil);
+    bindModeGestureRelease();
+  }
+
+  function modeGestureBlocked() {
+    return modeGestureWaitRelease || Date.now() < modeGestureGuardUntil;
+  }
+
+  function cancelBusyOps(msg) {
+    let did = false;
+
+    if (rpBusy || rpAbortController) {
+      rpRunId++;
+      if (rpAbortController) {
+        try { rpAbortController.abort(); } catch (_) {}
+        rpAbortController = null;
+      }
+      rpBusy = false;
+      did = true;
+    }
+
+    if (searching || searchAbortController) {
+      if (searchAbortController) {
+        try { searchAbortController.abort(); } catch (_) {}
+        searchAbortController = null;
+      }
+      searching = false;
+      did = true;
+    }
+
+    if (did) {
+      clearRpPulse();
+      statusMsg = msg || 'Операция отменена';
+      render();
+    }
+
+    return did;
   }
 
   const INTER_SEL = '[data-find],[data-q],[data-play],[data-prev],[data-next],[data-stab],[data-src],[data-rplay],[data-pl],[data-qadd],[data-resplay],[data-resadd],[data-resclear],[data-restoggle],[data-more],[data-queuetoggle],[data-clearqueue],[data-rfind],[data-rchip],[data-rtab],[data-somamore],[data-radiotoggle],[data-libtoggle],[data-pltoggle],[data-searchtab],[data-rptab],[data-savemanual],[data-saverp],[data-loadm],[data-loadrp],[data-openm],[data-openrp],[data-vol],[data-plnew],[data-pladd],[data-plpopclose],[data-swatch],[data-textswatch],[data-colorreset],[data-colorclose],[data-sizereset],[data-opacity],[data-editm],[data-editrp],[data-renm],[data-renrp],[data-trkdel],[data-pltrack],[data-editback],[data-delm],[data-delrp],[data-pledit],[data-pldel],[data-rfav],[data-rdelfav],[data-yteye],[data-ytclose],[data-expandfull],[data-quickvibe],[data-rptoggle],[data-rpnum],[data-rplang],[data-rpgenre],[data-rpsrc],[data-rpacc],[data-profsel],[data-profpick],[data-profpopclose],[data-cfg],[data-resize],[data-resize-left],[data-cancel-search],[data-cancel-rp],[data-link],[data-bgapplytheme],[data-bgapplyall],[data-bgdeltheme],[data-bgdelall],[data-textpick],[data-texthex],[data-textapplytheme],[data-textapplyall],[data-textdel],[data-solidtoggle],[data-solidlighttoggle],[data-soliddarkall],[data-solidlightall],[data-solidnoneall],[data-opapplytheme],[data-opapplyall],[data-bg-url],[data-bg-file],[data-colorpick],[data-colorhex],[data-progress-seek],[data-accentapplytheme],[data-accentapplyall],[data-accentdel],[data-acc],[data-favcur],[data-resfav],[data-qfav],[data-plfav],[data-loadfav],[data-loadfavqueue],[data-openfav],[data-editfav],[data-delfav],[data-favtrack],[data-favdel],[data-editplay],[data-exportopen],[data-exportdo],[data-exportcancel],[data-confirmdel],[data-confirmcancel],[data-importbackup],[data-backup],[data-fullreset]';
@@ -5128,6 +5232,7 @@
     const fabBtn = target.closest('[data-fabbtn]');
     if (fabBtn && uiMode === 'fab') {
       if (e.button === 2) return;
+      if (modeGestureBlocked()) return;
 
       fabLpFired = false;
       clearFabLongPress();
@@ -5153,6 +5258,8 @@
       try { fabBtn.setPointerCapture(e.pointerId); } catch (_) {}
 
       fabLpTimer = setTimeout(function () {
+        if (modeGestureBlocked()) return;
+
         fabLpFired = true;
         clearFabLongPress();
 
@@ -5167,8 +5274,8 @@
         syncMiniAnchorFromRoot();
         switchUiMode('panel');
 
-        lockUntil = Date.now() + 450;
-      }, 500);
+        armModeGestureGuard(MODE_SWITCH_COOLDOWN_MS);
+      }, MODE_LONG_PRESS_MS);
 
       return;
     }
@@ -5188,7 +5295,7 @@
     }
 
     const noteSource = target.closest('[data-notesource]');
-    if (noteSource && uiMode === 'panel') {
+    if (noteSource && uiMode === 'panel' && !modeGestureBlocked()) {
       noteLpFired = false;
       clearNoteLongPress();
 
@@ -5196,6 +5303,8 @@
       noteDownY = e.clientY;
 
       noteLpTimer = setTimeout(function () {
+        if (modeGestureBlocked()) return;
+
         noteLpFired = true;
         clearNoteLongPress();
 
@@ -5211,8 +5320,8 @@
         fromHandle = false;
         root.classList.remove('dragging');
 
-        lockUntil = Date.now() + 450;
-      }, 500);
+        armModeGestureGuard(MODE_SWITCH_COOLDOWN_MS);
+      }, MODE_LONG_PRESS_MS);
     }
 
     const themeBtn = target.closest('[data-themebtn]');
@@ -5228,12 +5337,12 @@
         colorPopOpen = true;
         render();
         lockUntil = Date.now() + 400;
-      }, 500);
+      }, MODE_LONG_PRESS_MS);
       return;
     }
 
     const fabSource = target.closest('[data-fabsource]');
-    if (fabSource && collapsed && uiMode !== 'fab') {
+    if (fabSource && collapsed && uiMode !== 'fab' && !modeGestureBlocked()) {
       lpFired = false;
       clearLongPress();
 
@@ -5244,6 +5353,8 @@
       const fdy = e.clientY;
 
       lpTimer = setTimeout(function () {
+        if (modeGestureBlocked()) return;
+
         lpFired = true;
         clearLongPress();
 
@@ -5253,10 +5364,9 @@
         pendingFabPoint = { x: fdx, y: fdy };
         switchUiMode('fab');
 
-        lockUntil = Date.now() + 450;
-      }, 500);
+        armModeGestureGuard(MODE_SWITCH_COOLDOWN_MS);
+      }, MODE_LONG_PRESS_MS);
     }
-
 
     if (target.closest(INTER_SEL)) return;
 
@@ -5271,6 +5381,7 @@
     bl = rect.left; bt = rect.top; bw = rect.width; bh = rect.height;
     try { handle.setPointerCapture(e.pointerId); } catch (_) {}
   }
+
   function onPointerMove(e) {
     if (activePointerId !== null && e.pointerId !== activePointerId) return;
 
@@ -5300,34 +5411,42 @@
     }
 
     if (lpTimer) {
-      if (Math.hypot(e.clientX - sx, e.clientY - sy) > 8) clearLongPress();
+      if (Math.hypot(e.clientX - sx, e.clientY - sy) > MODE_MOVE_CANCEL_PX) clearLongPress();
     }
     if (fabLpTimer) {
-      if (Math.hypot(e.clientX - fabDownX, e.clientY - fabDownY) > 8) clearFabLongPress();
+      if (Math.hypot(e.clientX - fabDownX, e.clientY - fabDownY) > MODE_MOVE_CANCEL_PX) clearFabLongPress();
     }
     if (noteLpTimer) {
-      if (Math.hypot(e.clientX - noteDownX, e.clientY - noteDownY) > 8) clearNoteLongPress();
+      if (Math.hypot(e.clientX - noteDownX, e.clientY - noteDownY) > MODE_MOVE_CANCEL_PX) clearNoteLongPress();
     }
+
     if (!down) return;
+
     const dx = e.clientX - sx, dy = e.clientY - sy;
     if (!moved && Math.hypot(dx, dy) < 6) return;
     if (e.cancelable) e.preventDefault();
+
     moved = true;
     root.classList.add('dragging');
+
     const W = VW(), H = VH();
     const minY = TOPBAR;
     let nx = bl + dx, ny = bt + dy;
     const maxX = W - bw - 4, maxY = H - bh - 4;
+
     if (nx < 4) nx = 4;
     if (maxX > 4 && nx > maxX) nx = maxX;
     if (ny < minY) ny = minY;
     if (maxY > minY && ny > maxY) ny = maxY;
+
     posX = nx; posY = ny;
     root.style.left = nx + 'px';
     root.style.top = ny + 'px';
   }
 
   function onPointerUp(e) {
+    endModeGestureGuard();
+
     if (activePointerId !== null && e.pointerId !== activePointerId) return;
 
     if (resizing) {
@@ -5353,12 +5472,12 @@
         fromHandle = false;
         root.classList.remove('dragging');
         activePointerId = null;
-        lockUntil = Date.now() + 350;
+        armModeGestureGuard(450);
         return;
       }
     }
 
-    if (fabLpTimer) {
+    if (fabLpTimer || fabLpFired) {
       clearFabLongPress();
 
       if (fabLpFired) {
@@ -5368,7 +5487,7 @@
         fromHandle = false;
         root.classList.remove('dragging');
         activePointerId = null;
-        lockUntil = Date.now() + 350;
+        armModeGestureGuard(450);
         return;
       }
     }
@@ -5445,20 +5564,22 @@
       if (uiMode === 'fab') {
         const fb = e.target && e.target.closest && e.target.closest('[data-fabbtn]');
         if (fb && fb.getAttribute('data-fabvibe')) {
-          clearRpPulse();
-          rpQuickVibe();
+          if (!cancelBusyOps('Операция отменена')) {
+            clearRpPulse();
+            rpQuickVibe();
+          }
         } else {
           togglePlay();
         }
 
-        lockUntil = Date.now() + 300;
+        lockUntil = Date.now() + 350;
         return;
       }
 
       const noteTap = e.target && e.target.closest && e.target.closest('[data-notebtn]');
       if (noteTap && uiMode === 'panel') {
         switchUiMode('pill');
-        lockUntil = Date.now() + 400;
+        armModeGestureGuard(650);
         return;
       }
 
@@ -5468,7 +5589,7 @@
         switchUiMode('panel');
       }
 
-      lockUntil = Date.now() + 400;
+      armModeGestureGuard(650);
       return;
     }
   }
@@ -5477,12 +5598,20 @@
     clearLongPress();
     clearFabLongPress();
     clearNoteLongPress();
+    endModeGestureGuard();
+
     if (resizing) {
-      resizing = false; leftResize = false;
+      resizing = false;
+      leftResize = false;
       root.classList.remove('resizing');
       saveSize();
     }
-    if (down) { down = false; root.classList.remove('dragging'); }
+
+    if (down) {
+      down = false;
+      root.classList.remove('dragging');
+    }
+
     activePointerId = null;
   }
 
@@ -5585,7 +5714,14 @@
     if ((m = t.closest('[data-rpsrc]'))) { cfg.rpSource = m.getAttribute('data-rpsrc'); saveCfg(); render(); lockUntil = Date.now() + 200; return; }
     if ((m = t.closest('[data-rpgenre]'))) { cfg.rpGenre = m.getAttribute('data-rpgenre'); saveCfg(); render(); lockUntil = Date.now() + 200; return; }
 
-    if (t.closest('[data-quickvibe]')) { clearRpPulse(); rpQuickVibe(); lockUntil = Date.now() + 300; return; }
+    if (t.closest('[data-quickvibe]')) {
+      if (!cancelBusyOps('Операция отменена')) {
+        clearRpPulse();
+        rpQuickVibe();
+      }
+      lockUntil = Date.now() + 300;
+      return;
+    }
     if (t.closest('[data-yteye]')) { ytHidden = !ytHidden; applyEyeState(); return; }
     if (t.closest('[data-ytclose]')) { closeYt(); return; }
     if (t.closest('[data-expandfull]')) {
