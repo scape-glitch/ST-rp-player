@@ -5321,16 +5321,16 @@
         pendingFabPoint = { x: noteDownX, y: noteDownY };
         switchUiMode('fab');
 
-        suppressFabVibeUntil = Date.now() + 1800;
-        modeGestureSuppressClickUntil = Date.now() + 1800;
-        lockUntil = Math.max(lockUntil, Date.now() + 1800);
+        suppressFabVibeUntil = Date.now() + 1000;
+        modeGestureSuppressClickUntil = Date.now() + 1000;
+        lockUntil = Math.max(lockUntil, Date.now() + 1000);
 
         down = false;
         moved = false;
         fromHandle = false;
         root.classList.remove('dragging');
 
-        armModeGestureGuard(1800);
+        armModeGestureGuard(1000);
       }, MODE_LONG_PRESS_MS);
     }
 
