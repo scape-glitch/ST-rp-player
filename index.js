@@ -3409,8 +3409,11 @@
   }
 
   function rpQuickVibe() {
-    if (rpBusy || searching || rpAbortController || searchAbortController) {
-      cancelBusyOps('Операция отменена');
+    if (rpBusy) return;
+
+    if (searching || searchAbortController) {
+      statusMsg = 'Сначала завершите или отмените текущий поиск';
+      render();
       return;
     }
 
@@ -5144,6 +5147,7 @@
   let modeGestureGuardUntil = 0;
   let modeGestureWaitRelease = false;
   let modeGestureReleaseBound = false;
+  let modeGestureSuppressClickUntil = 0;
   let rpRunId = 0;
 
   function clearLongPress() {
@@ -5185,6 +5189,7 @@
   function armModeGestureGuard(ms) {
     modeGestureGuardUntil = Date.now() + (ms || MODE_SWITCH_COOLDOWN_MS);
     modeGestureWaitRelease = true;
+    modeGestureSuppressClickUntil = Date.now() + Math.max(ms || MODE_SWITCH_COOLDOWN_MS, 900);
     lockUntil = Math.max(lockUntil, modeGestureGuardUntil);
     bindModeGestureRelease();
   }
@@ -5198,19 +5203,13 @@
 
     if (rpBusy || rpAbortController) {
       rpRunId++;
+
       if (rpAbortController) {
         try { rpAbortController.abort(); } catch (_) {}
         rpAbortController = null;
       }
-      rpBusy = false;
-      did = true;
-    }
 
-    if (searching || searchAbortController) {
-      if (searchAbortController) {
-        try { searchAbortController.abort(); } catch (_) {}
-        searchAbortController = null;
-      }
+      rpBusy = false;
       searching = false;
       did = true;
     }
@@ -5445,6 +5444,7 @@
   }
 
   function onPointerUp(e) {
+    const wasModeGestureBlocked = modeGestureWaitRelease || Date.now() < modeGestureGuardUntil;
     endModeGestureGuard();
 
     if (activePointerId !== null && e.pointerId !== activePointerId) return;
@@ -5472,7 +5472,7 @@
         fromHandle = false;
         root.classList.remove('dragging');
         activePointerId = null;
-        armModeGestureGuard(450);
+        armModeGestureGuard(900);
         return;
       }
     }
@@ -5487,9 +5487,20 @@
         fromHandle = false;
         root.classList.remove('dragging');
         activePointerId = null;
-        armModeGestureGuard(450);
+        armModeGestureGuard(900);
         return;
       }
+    }
+
+    if (wasModeGestureBlocked) {
+      down = false;
+      moved = false;
+      fromHandle = false;
+      root.classList.remove('dragging');
+      activePointerId = null;
+      modeGestureSuppressClickUntil = Date.now() + 900;
+      lockUntil = Math.max(lockUntil, Date.now() + 900);
+      return;
     }
 
     if (lpTimer) {
@@ -5501,7 +5512,8 @@
       if (lpFired) {
         lpFired = false;
         activePointerId = null;
-        lockUntil = Date.now() + 350;
+        modeGestureSuppressClickUntil = Date.now() + 900;
+        lockUntil = Date.now() + 900;
         return;
       }
 
@@ -5563,8 +5575,11 @@
 
       if (uiMode === 'fab') {
         const fb = e.target && e.target.closest && e.target.closest('[data-fabbtn]');
+
         if (fb && fb.getAttribute('data-fabvibe')) {
-          if (!cancelBusyOps('Операция отменена')) {
+          if (rpBusy || rpAbortController) {
+            cancelBusyOps('Операция отменена');
+          } else {
             clearRpPulse();
             rpQuickVibe();
           }
@@ -5579,7 +5594,7 @@
       const noteTap = e.target && e.target.closest && e.target.closest('[data-notebtn]');
       if (noteTap && uiMode === 'panel') {
         switchUiMode('pill');
-        armModeGestureGuard(650);
+        armModeGestureGuard(900);
         return;
       }
 
@@ -5589,7 +5604,7 @@
         switchUiMode('panel');
       }
 
-      armModeGestureGuard(650);
+      armModeGestureGuard(900);
       return;
     }
   }
@@ -5624,7 +5639,7 @@
   function rememberScroll() { saveScrollState(renderedScrollKey); }
 
   function onClick(e) {
-    if (Date.now() < lockUntil) return;
+    if (Date.now() < lockUntil || Date.now() < modeGestureSuppressClickUntil) return;
     const t = e.target;
     const inter = t.closest && t.closest(INTER_SEL);
     if (!inter) return;
@@ -5715,10 +5730,8 @@
     if ((m = t.closest('[data-rpgenre]'))) { cfg.rpGenre = m.getAttribute('data-rpgenre'); saveCfg(); render(); lockUntil = Date.now() + 200; return; }
 
     if (t.closest('[data-quickvibe]')) {
-      if (!cancelBusyOps('Операция отменена')) {
-        clearRpPulse();
-        rpQuickVibe();
-      }
+      clearRpPulse();
+      rpQuickVibe();
       lockUntil = Date.now() + 300;
       return;
     }
