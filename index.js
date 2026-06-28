@@ -4242,8 +4242,16 @@
   }
 
   function fabShowsVibe() {
-    const playingSomething = (isPlaying && curIdx >= 0) || !!window.__rpRadioNow;
-    return rpEnabled() && cfg.rpQuick && !playingSomething;
+    if (!rpEnabled() || !cfg.rpQuick) return false;
+
+    if (window.__rpRadioNow) return false;
+
+    if (curIdx >= 0 && queue[curIdx]) {
+      const lastOneEnded = trackEnded && queue.length <= 1;
+      return lastOneEnded;
+    }
+
+    return true;
   }
 
   function fabHTML() {
