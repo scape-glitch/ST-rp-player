@@ -1005,8 +1005,10 @@
     { id: 'blues', label: 'Блюз' },
     { id: 'soundtrack', label: 'Саундтрек' },
     { id: 'indie', label: 'Инди' },
-    { id: 'punk', label: 'Панк' }
-  ];
+    { id: 'punk', label: 'Панк' },
+    { id: 'meme', label: 'Мемы' }
+];
+
 
   function isMemeGenre() {
     return cfg.rpGenre === 'meme';
@@ -4601,16 +4603,15 @@
     if (rpAccGenre) {
       h += '<div class="' + PFX + '-acc-body"><div class="' + PFX + '-chips">';
       RP_GENRES.forEach(function (g) {
-        h += '<div class="' + PFX + '-chip ' + (cfg.rpGenre === g.id ? 'on' : '') + '" data-rpgenre="' + g.id + '">' + g.label + '</div>';
+        h += '<div class="' + PFX + '-chip ' + (g.id === 'meme' ? 'meme ' : '') + (cfg.rpGenre === g.id ? 'on' : '') + '" data-rpgenre="' + g.id + '">' + g.label + '</div>';
       });
-      h += '<div class="' + PFX + '-chip ' + (cfg.rpGenre === 'custom' ? 'on' : '') + '" data-rpgenre="custom">+ свой</div>';
-      h += '<div class="' + PFX + '-chip meme ' + (cfg.rpGenre === 'meme' ? 'on' : '') + '" data-rpgenre="meme">🤪 Мемы</div>';
-      h += '</div>';
+        h += '<div class="' + PFX + '-chip ' + (cfg.rpGenre === 'custom' ? 'on' : '') + '" data-rpgenre="custom">+ свой</div>';
+        h += '</div>';
       if (cfg.rpGenre === 'custom') {
         h += '<input class="' + PFX + '-finput" data-cfg="rpGenreCustom" placeholder="напр. shoegaze, drum and bass..." value="' + esc(cfg.rpGenreCustom) + '">';
       }
       if (cfg.rpGenre === 'meme') {
-        h += '<div class="' + PFX + '-ythint" style="text-align:left; line-height:1.4; margin-top:4px;">Мем-режим: ИИ подбирает максимально нелепые вирусные мемные звуки и треки (sad trombone, Rickroll, «Directed by Robert B. Weide», тренды TikTok, музыка для эдитов, вайн-бумы и т.п.) под происходящее в сцене — для контраста или разрядки. Язык игнорируется.</div>';
+        h += '<div class="' + PFX + '-ythint" style="text-align:left; line-height:1.4; margin-top:4px;">Мем-режим: подбирает вирусные мемные треки, звуки, TikTok-аудио, фейл-эффекты, музыку для эдитов и абсурдные вставки, чтобы подчеркнуть нелепость сцены, создать контраст или разрядить обстановку. Язык в этом режиме не учитывается.</div>';
       }
       h += '</div>';
     }
