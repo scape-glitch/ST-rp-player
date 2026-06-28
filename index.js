@@ -5902,8 +5902,6 @@
     if ((m = t.closest('[data-pledit]'))) { renameItem(parseInt(m.getAttribute('data-pledit'), 10)); lockUntil = Date.now() + 300; return; }
     if ((m = t.closest('[data-pldel]'))) { removeFromQueue(parseInt(m.getAttribute('data-pldel'), 10)); lockUntil = Date.now() + 300; return; }
 
-    if ((m = t.closest('[data-openm]'))) { openManualEditor(m.getAttribute('data-openm')); lockUntil = Date.now() + 300; return; }
-    if ((m = t.closest('[data-openrp]'))) { openRpEditor(m.getAttribute('data-openrp')); lockUntil = Date.now() + 300; return; }
     if ((m = t.closest('[data-editm]'))) { openManualEditor(m.getAttribute('data-editm')); lockUntil = Date.now() + 300; return; }
     if ((m = t.closest('[data-editrp]'))) { openRpEditor(m.getAttribute('data-editrp')); lockUntil = Date.now() + 300; return; }
 
@@ -5928,6 +5926,9 @@
 
     if ((m = t.closest('[data-loadm]'))) { const p = lib.manual.find(function (x) { return x.id === m.getAttribute('data-loadm'); }); if (p) loadPlaylist(p.tracks); lockUntil = Date.now() + 300; return; }
     if ((m = t.closest('[data-loadrp]'))) { const p = lib.rp[m.getAttribute('data-loadrp')]; if (p) loadPlaylist(p.tracks); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-openm]'))) { openManualEditor(m.getAttribute('data-openm')); lockUntil = Date.now() + 300; return; }
+    if ((m = t.closest('[data-openrp]'))) { openRpEditor(m.getAttribute('data-openrp')); lockUntil = Date.now() + 300; return; }
+
 
     if (t.closest('[data-savemanual]')) { plPop = 'queue'; render(); lockUntil = Date.now() + 300; return; }
     if (t.closest('[data-saverp]')) { saveCurrentAsRp(); lockUntil = Date.now() + 300; return; }
