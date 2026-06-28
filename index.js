@@ -5133,10 +5133,9 @@
     root.style.top = Math.round(posY) + 'px';
   }
 
-
-  const MODE_LONG_PRESS_MS = 750;
-  const MODE_SWITCH_COOLDOWN_MS = 950;
-  const MODE_MOVE_CANCEL_PX = 12;
+  const MODE_LONG_PRESS_MS = 600;
+  const MODE_SWITCH_COOLDOWN_MS = 350;
+  const MODE_MOVE_CANCEL_PX = 10;
 
   let down = false, moved = false, fromHandle = false, sx = 0, sy = 0, bl = 0, bt = 0, bw = 0, bh = 0, lockUntil = 0;
   let lpTimer = null, lpFired = false;
@@ -5188,9 +5187,10 @@
   }
 
   function armModeGestureGuard(ms) {
-    modeGestureGuardUntil = Date.now() + (ms || MODE_SWITCH_COOLDOWN_MS);
+    const dur = ms || MODE_SWITCH_COOLDOWN_MS;
+    modeGestureGuardUntil = Date.now() + dur;
     modeGestureWaitRelease = true;
-    modeGestureSuppressClickUntil = Date.now() + Math.max(ms || MODE_SWITCH_COOLDOWN_MS, 900);
+    modeGestureSuppressClickUntil = Date.now() + dur;
     lockUntil = Math.max(lockUntil, modeGestureGuardUntil);
     bindModeGestureRelease();
   }
@@ -5321,7 +5321,7 @@
         pendingFabPoint = { x: noteDownX, y: noteDownY };
         switchUiMode('fab');
 
-        suppressFabVibeUntil = Date.now() + 1000;
+        suppressFabVibeUntil = Date.now() + 350;
         modeGestureSuppressClickUntil = Date.now() + 1000;
         lockUntil = Math.max(lockUntil, Date.now() + 1000);
 
@@ -5377,11 +5377,11 @@
         pendingFabPoint = { x: fdx, y: fdy };
         switchUiMode('fab');
 
-        suppressFabVibeUntil = Date.now() + 1800;
-        modeGestureSuppressClickUntil = Date.now() + 1800;
-        lockUntil = Math.max(lockUntil, Date.now() + 1800);
+        suppressFabVibeUntil = Date.now() + 350;
+        modeGestureSuppressClickUntil = Date.now() + 350;
+        lockUntil = Math.max(lockUntil, Date.now() + 350);
 
-        armModeGestureGuard(1800);
+        armModeGestureGuard(350);
       }, MODE_LONG_PRESS_MS);
     }
 
