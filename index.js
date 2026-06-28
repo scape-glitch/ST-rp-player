@@ -5148,6 +5148,7 @@
   let modeGestureWaitRelease = false;
   let modeGestureReleaseBound = false;
   let modeGestureSuppressClickUntil = 0;
+  let suppressFabVibeUntil = 0;
   let rpRunId = 0;
 
   function clearLongPress() {
@@ -5273,7 +5274,9 @@
         syncMiniAnchorFromRoot();
         switchUiMode('panel');
 
-        armModeGestureGuard(MODE_SWITCH_COOLDOWN_MS);
+        modeGestureSuppressClickUntil = Date.now() + 1800;
+        lockUntil = Math.max(lockUntil, Date.now() + 1800);
+        armModeGestureGuard(1800);
       }, MODE_LONG_PRESS_MS);
 
       return;
@@ -5286,7 +5289,11 @@
       leftResize = !!lz;
       activePointerId = e.pointerId;
       const rect = root.getBoundingClientRect();
-      rsx = e.clientX; rsy = e.clientY; rsW = rect.width; rsH = rect.height; startLeft = rect.left;
+      rsx = e.clientX;
+      rsy = e.clientY;
+      rsW = rect.width;
+      rsH = rect.height;
+      startLeft = rect.left;
       root.classList.add('resizing');
       try { (rz || lz).setPointerCapture(e.pointerId); } catch (_) {}
       if (e.cancelable) e.preventDefault();
@@ -5314,12 +5321,16 @@
         pendingFabPoint = { x: noteDownX, y: noteDownY };
         switchUiMode('fab');
 
+        suppressFabVibeUntil = Date.now() + 1800;
+        modeGestureSuppressClickUntil = Date.now() + 1800;
+        lockUntil = Math.max(lockUntil, Date.now() + 1800);
+
         down = false;
         moved = false;
         fromHandle = false;
         root.classList.remove('dragging');
 
-        armModeGestureGuard(MODE_SWITCH_COOLDOWN_MS);
+        armModeGestureGuard(1800);
       }, MODE_LONG_PRESS_MS);
     }
 
@@ -5327,7 +5338,9 @@
     if (themeBtn) {
       lpFired = false;
       clearLongPress();
-      sx = e.clientX; sy = e.clientY;
+      sx = e.clientX;
+      sy = e.clientY;
+
       lpTimer = setTimeout(function () {
         lpFired = true;
         clearLongPress();
@@ -5337,6 +5350,7 @@
         render();
         lockUntil = Date.now() + 400;
       }, MODE_LONG_PRESS_MS);
+
       return;
     }
 
@@ -5363,7 +5377,11 @@
         pendingFabPoint = { x: fdx, y: fdy };
         switchUiMode('fab');
 
-        armModeGestureGuard(MODE_SWITCH_COOLDOWN_MS);
+        suppressFabVibeUntil = Date.now() + 1800;
+        modeGestureSuppressClickUntil = Date.now() + 1800;
+        lockUntil = Math.max(lockUntil, Date.now() + 1800);
+
+        armModeGestureGuard(1800);
       }, MODE_LONG_PRESS_MS);
     }
 
@@ -5373,11 +5391,19 @@
     if (!handle) return;
     if (e.button === 2) return;
 
-    down = true; moved = false; fromHandle = true;
+    down = true;
+    moved = false;
+    fromHandle = true;
     activePointerId = e.pointerId;
-    sx = e.clientX; sy = e.clientY;
+    sx = e.clientX;
+    sy = e.clientY;
+
     const rect = root.getBoundingClientRect();
-    bl = rect.left; bt = rect.top; bw = rect.width; bh = rect.height;
+    bl = rect.left;
+    bt = rect.top;
+    bw = rect.width;
+    bh = rect.height;
+
     try { handle.setPointerCapture(e.pointerId); } catch (_) {}
   }
 
@@ -5445,6 +5471,7 @@
 
   function onPointerUp(e) {
     const wasModeGestureBlocked = modeGestureWaitRelease || Date.now() < modeGestureGuardUntil;
+
     endModeGestureGuard();
 
     if (activePointerId !== null && e.pointerId !== activePointerId) return;
@@ -5472,7 +5499,12 @@
         fromHandle = false;
         root.classList.remove('dragging');
         activePointerId = null;
-        armModeGestureGuard(900);
+
+        suppressFabVibeUntil = Date.now() + 1800;
+        modeGestureSuppressClickUntil = Date.now() + 1800;
+        lockUntil = Math.max(lockUntil, Date.now() + 1800);
+
+        armModeGestureGuard(1800);
         return;
       }
     }
@@ -5487,7 +5519,11 @@
         fromHandle = false;
         root.classList.remove('dragging');
         activePointerId = null;
-        armModeGestureGuard(900);
+
+        modeGestureSuppressClickUntil = Date.now() + 1800;
+        lockUntil = Math.max(lockUntil, Date.now() + 1800);
+
+        armModeGestureGuard(1800);
         return;
       }
     }
@@ -5498,8 +5534,9 @@
       fromHandle = false;
       root.classList.remove('dragging');
       activePointerId = null;
-      modeGestureSuppressClickUntil = Date.now() + 900;
-      lockUntil = Math.max(lockUntil, Date.now() + 900);
+
+      modeGestureSuppressClickUntil = Date.now() + 1800;
+      lockUntil = Math.max(lockUntil, Date.now() + 1800);
       return;
     }
 
@@ -5570,13 +5607,18 @@
     }
 
     if (wasHandle) {
-      if (Date.now() < lockUntil) return;
+      if (Date.now() < lockUntil || Date.now() < modeGestureSuppressClickUntil) return;
       if (e && e.cancelable) e.preventDefault();
 
       if (uiMode === 'fab') {
         const fb = e.target && e.target.closest && e.target.closest('[data-fabbtn]');
 
         if (fb && fb.getAttribute('data-fabvibe')) {
+          if (Date.now() < suppressFabVibeUntil) {
+            lockUntil = Date.now() + 350;
+            return;
+          }
+
           if (rpBusy || rpAbortController) {
             cancelBusyOps('Операция отменена');
           } else {
@@ -5730,6 +5772,11 @@
     if ((m = t.closest('[data-rpgenre]'))) { cfg.rpGenre = m.getAttribute('data-rpgenre'); saveCfg(); render(); lockUntil = Date.now() + 200; return; }
 
     if (t.closest('[data-quickvibe]')) {
+      if (Date.now() < suppressFabVibeUntil) {
+        lockUntil = Date.now() + 350;
+        return;
+      }
+
       clearRpPulse();
       rpQuickVibe();
       lockUntil = Date.now() + 300;
@@ -6171,6 +6218,11 @@
           rememberReturnMiniFromRect(rect, 'pill');
           pendingFabPoint = { x: e.clientX, y: e.clientY };
           switchUiMode('fab');
+
+          suppressFabVibeUntil = Date.now() + 1800;
+          modeGestureSuppressClickUntil = Date.now() + 1800;
+          lockUntil = Math.max(lockUntil, Date.now() + 1800);
+
           return;
         }
 
@@ -6181,6 +6233,10 @@
           syncMiniAnchorFromRoot();
           pendingFabPoint = { x: e.clientX, y: e.clientY };
           switchUiMode('fab');
+
+          suppressFabVibeUntil = Date.now() + 1800;
+          modeGestureSuppressClickUntil = Date.now() + 1800;
+          lockUntil = Math.max(lockUntil, Date.now() + 1800);
         }
       });
 
