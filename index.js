@@ -5274,9 +5274,9 @@
         syncMiniAnchorFromRoot();
         switchUiMode('panel');
 
-        modeGestureSuppressClickUntil = Date.now() + 1800;
-        lockUntil = Math.max(lockUntil, Date.now() + 1800);
-        armModeGestureGuard(1800);
+        modeGestureSuppressClickUntil = Date.now() + 350;
+        lockUntil = Math.max(lockUntil, Date.now() + 350);
+        armModeGestureGuard(350);
       }, MODE_LONG_PRESS_MS);
 
       return;
@@ -5322,15 +5322,15 @@
         switchUiMode('fab');
 
         suppressFabVibeUntil = Date.now() + 350;
-        modeGestureSuppressClickUntil = Date.now() + 1000;
-        lockUntil = Math.max(lockUntil, Date.now() + 1000);
+        modeGestureSuppressClickUntil = Date.now() + 350;
+        lockUntil = Math.max(lockUntil, Date.now() + 350);
 
         down = false;
         moved = false;
         fromHandle = false;
         root.classList.remove('dragging');
 
-        armModeGestureGuard(1000);
+        armModeGestureGuard(350);
       }, MODE_LONG_PRESS_MS);
     }
 
@@ -5500,11 +5500,11 @@
         root.classList.remove('dragging');
         activePointerId = null;
 
-        suppressFabVibeUntil = Date.now() + 1800;
-        modeGestureSuppressClickUntil = Date.now() + 1800;
-        lockUntil = Math.max(lockUntil, Date.now() + 1800);
+        suppressFabVibeUntil = Date.now() + 350;
+        modeGestureSuppressClickUntil = Date.now() + 350;
+        lockUntil = Math.max(lockUntil, Date.now() + 350);
 
-        armModeGestureGuard(1800);
+        armModeGestureGuard(350);
         return;
       }
     }
@@ -5520,10 +5520,10 @@
         root.classList.remove('dragging');
         activePointerId = null;
 
-        modeGestureSuppressClickUntil = Date.now() + 1800;
-        lockUntil = Math.max(lockUntil, Date.now() + 1800);
+        modeGestureSuppressClickUntil = Date.now() + 350;
+        lockUntil = Math.max(lockUntil, Date.now() + 350);
 
-        armModeGestureGuard(1800);
+        armModeGestureGuard(350);
         return;
       }
     }
@@ -5535,8 +5535,8 @@
       root.classList.remove('dragging');
       activePointerId = null;
 
-      modeGestureSuppressClickUntil = Date.now() + 1800;
-      lockUntil = Math.max(lockUntil, Date.now() + 1800);
+      modeGestureSuppressClickUntil = Date.now() + 350;
+      lockUntil = Math.max(lockUntil, Date.now() + 350);
       return;
     }
 
@@ -5549,8 +5549,8 @@
       if (lpFired) {
         lpFired = false;
         activePointerId = null;
-        modeGestureSuppressClickUntil = Date.now() + 900;
-        lockUntil = Date.now() + 900;
+        modeGestureSuppressClickUntil = Date.now() + 350;
+        lockUntil = Date.now() + 350;
         return;
       }
 
@@ -5636,7 +5636,7 @@
       const noteTap = e.target && e.target.closest && e.target.closest('[data-notebtn]');
       if (noteTap && uiMode === 'panel') {
         switchUiMode('pill');
-        armModeGestureGuard(900);
+        armModeGestureGuard(350);
         return;
       }
 
@@ -5646,7 +5646,7 @@
         switchUiMode('panel');
       }
 
-      armModeGestureGuard(900);
+      armModeGestureGuard(350);
       return;
     }
   }
@@ -6219,9 +6219,9 @@
           pendingFabPoint = { x: e.clientX, y: e.clientY };
           switchUiMode('fab');
 
-          suppressFabVibeUntil = Date.now() + 1800;
-          modeGestureSuppressClickUntil = Date.now() + 1800;
-          lockUntil = Math.max(lockUntil, Date.now() + 1800);
+          suppressFabVibeUntil = Date.now() + 350;
+          modeGestureSuppressClickUntil = Date.now() + 350;
+          lockUntil = Math.max(lockUntil, Date.now() + 350);
 
           return;
         }
@@ -6234,9 +6234,9 @@
           pendingFabPoint = { x: e.clientX, y: e.clientY };
           switchUiMode('fab');
 
-          suppressFabVibeUntil = Date.now() + 1800;
-          modeGestureSuppressClickUntil = Date.now() + 1800;
-          lockUntil = Math.max(lockUntil, Date.now() + 1800);
+          suppressFabVibeUntil = Date.now() + 350;
+          modeGestureSuppressClickUntil = Date.now() + 350;
+          lockUntil = Math.max(lockUntil, Date.now() + 350);
         }
       });
 
