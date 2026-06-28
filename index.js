@@ -2515,9 +2515,10 @@
   function togglePlay() {
     if (curIdx < 0) {
       if (window.__rpRadioNow) {
-        if (isPlaying) {
-          audio.pause();
+        if (isPlaying || !audio.paused) {
+          try { audio.pause(); } catch (_) {}
           isPlaying = false;
+          updatePlayBtn();
         } else {
           audio.play().then(function () {
             isPlaying = true;
@@ -2528,7 +2529,6 @@
             render();
           });
         }
-        updatePlayBtn();
         return;
       }
 
@@ -2544,8 +2544,8 @@
       return;
     }
 
-    if (isPlaying) {
-      audio.pause();
+    if (isPlaying || !audio.paused) {
+      try { audio.pause(); } catch (_) {}
       isPlaying = false;
       updatePlayBtn();
       return;
@@ -2553,7 +2553,7 @@
 
     trackEnded = false;
 
-    if (audio.src && audio.readyState >= 2 && !isYtTrack(t)) {
+    if (audio.src && !isYtTrack(t)) {
       audio.play().then(function () {
         isPlaying = true;
         updatePlayBtn();
@@ -2563,17 +2563,7 @@
       return;
     }
 
-    if (isYtTrack(t) || !audio.src) {
-      playIndex(curIdx);
-      return;
-    }
-
-    audio.play().then(function () {
-      isPlaying = true;
-      updatePlayBtn();
-    }).catch(function () {
-      playIndex(curIdx);
-    });
+    playIndex(curIdx);
   }
 
   function nextTrack() {
