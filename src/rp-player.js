@@ -14,6 +14,7 @@ import { createPlayerStreams } from './player-streams.js';
 import { createSources } from './sources.js';
 import { createRadio } from './radio.js';
 import { createStorage } from './storage.js';
+import { createLibrary } from './library.js';
 
 export function startRpMusicPlayer() {
 (function () {
@@ -828,78 +829,29 @@ export function startRpMusicPlayer() {
     storage.saveRpRejected(rpRejected);
   }
 
-  function trackSigForFav(t) {
-    if (!t) return '';
-    if (t.ytid) return 'yt:' + t.ytid;
-    if (t.url) return 'url:' + t.url;
-    return rpTrackSig(t);
-  }
-
-  function isFav(t) {
-    const sig = trackSigForFav(t);
-    if (!sig) return false;
-    return lib.favorites.some(function (x) { return trackSigForFav(x) === sig; });
-  }
-
-  function toggleFav(t) {
-    if (!t) return;
-    const sig = trackSigForFav(t);
-    if (!sig) return;
-    const idx = lib.favorites.findIndex(function (x) { return trackSigForFav(x) === sig; });
-    if (idx >= 0) {
-      lib.favorites.splice(idx, 1);
-      dbg('fav', 'removed', rpTrackHuman(t));
-    } else {
-      const copy = JSON.parse(JSON.stringify(t));
-      delete copy._rpSuggestedChat;
-      delete copy._rpWhy;
-      delete copy.why;
-      lib.favorites.push(copy);
-      dbg('fav', 'added', rpTrackHuman(t));
-    }
-    saveLib();
-    render();
-  }
-
-  function trackExistsAnywhereExceptRemoval(sig, exclude) {
-    if (!sig) return true;
-    function has(arr) {
-      if (!Array.isArray(arr)) return false;
-      return arr.some(function (t) {
-        return t && t !== exclude && trackSigForFav(t) === sig;
-      });
-    }
-    if (has(queue)) return true;
-    if (has(lib.favorites)) return true;
-    for (let i = 0; i < lib.manual.length; i++) {
-      if (lib.manual[i] && has(lib.manual[i].tracks)) return true;
-    }
-    const keys = Object.keys(lib.rp);
-    for (let i = 0; i < keys.length; i++) {
-      if (lib.rp[keys[i]] && has(lib.rp[keys[i]].tracks)) return true;
-    }
-    return false;
-  }
-
-  function markGlobalDislike(track) {
-    if (!track) return;
-    const sig = trackSigForFav(track);
-    if (!sig) return;
-    if (trackExistsAnywhereExceptRemoval(sig, track)) {
-      dbg('dislike', 'skip (still exists elsewhere)', rpTrackHuman(track));
-      return;
-    }
-    const cid = getChatId();
-    const rsig = rpTrackSig(track);
-    if (!rsig) return;
-    if (!rpRejected[cid]) rpRejected[cid] = [];
-    if (rpRejected[cid].indexOf(rsig) < 0) {
-      rpRejected[cid].push(rsig);
-      rpRejected[cid] = rpRejected[cid].slice(-300);
-      saveRpRejected();
-      dbg('dislike', 'global dislike recorded', rpTrackHuman(track));
-    }
-  }
+  const library = createLibrary({
+    getLib: function () { return lib; },
+    getQueue: function () { return queue; },
+    getRpRejected: function () { return rpRejected; },
+    saveLib: saveLib,
+    saveRpRejected: saveRpRejected,
+    getChatId: getChatId,
+    getChatName: getChatName,
+    getResultsRp: function () { return resultsRp; },
+    dateStamp: dateStamp,
+    rpTrackSig: rpTrackSig,
+    rpTrackHuman: rpTrackHuman,
+    dbg: dbg,
+    render: render,
+    flashPlaylist: flashPlaylist
+  });
+  const trackSigForFav = library.trackSigForFav;
+  const isFav = library.isFav;
+  const toggleFav = library.toggleFav;
+  const trackExistsAnywhereExceptRemoval = library.trackExistsAnywhereExceptRemoval;
+  const markGlobalDislike = library.markGlobalDislike;
+  const addTrackToManual = library.addTrackToManual;
+  const addToRpPlaylist = library.addToRpPlaylist;
   function isMemeGenre() {
     return cfg.rpGenre === 'meme';
   }
@@ -2079,23 +2031,6 @@ export function startRpMusicPlayer() {
     }, 1200);
   }
 
-  function addTrackToManual(plId, track) {
-    const p = lib.manual.find(function (x) { return x.id === plId; });
-    if (!p || !track) return;
-
-    if (!Array.isArray(p.tracks)) p.tracks = [];
-
-    const copy = JSON.parse(JSON.stringify(track));
-    if (resultsRp) {
-      copy._rpSuggestedChat = getChatId();
-      if (copy.why && !copy._rpWhy) copy._rpWhy = copy.why;
-    }
-
-    p.tracks.push(copy);
-    saveLib();
-    flashPlaylist(plId);
-  }
-
   function createManualFromQueue() {
     if (!queue.length) {
       statusMsg = 'Очередь пуста';
@@ -2151,35 +2086,6 @@ export function startRpMusicPlayer() {
 
     saveLib();
     render();
-  }
-
-  function addToRpPlaylist(track) {
-    if (!track) return;
-
-    const cid = getChatId();
-    if (!lib.rp[cid]) lib.rp[cid] = { name: getChatName() + ' ' + dateStamp(), tracks: [] };
-    if (!Array.isArray(lib.rp[cid].tracks)) lib.rp[cid].tracks = [];
-
-    const copy = JSON.parse(JSON.stringify(track));
-    copy._rpSuggestedChat = cid;
-    if (copy.why && !copy._rpWhy) copy._rpWhy = copy.why;
-
-    const sig = rpTrackSig(copy);
-
-    const exists = lib.rp[cid].tracks.some(function (x) {
-      const xsig = rpTrackSig(x);
-      if (sig && xsig && sig === xsig) return true;
-
-      if (x.kind === 'yt' && copy.kind === 'yt' && x.ytid && copy.ytid) return x.ytid === copy.ytid;
-      if (x.url && copy.url) return x.url === copy.url;
-
-      return false;
-    });
-
-    if (!exists) {
-      lib.rp[cid].tracks.push(copy);
-      saveLib();
-    }
   }
 
   function loadPlaylist(tracks) {
