@@ -1,6 +1,3 @@
-// RP Music Player — SVG icons (zero-loss modular split)
-// SVG перенесены 1-в-1 из исходного index.js. Названия иконок и разметка SVG не менялись.
-
 import { PFX } from './constants.js';
 
 export const ICONS = {

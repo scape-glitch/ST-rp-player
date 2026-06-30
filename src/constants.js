@@ -1,6 +1,3 @@
-// RP Music Player — constants (zero-loss modular split)
-// Значения перенесены 1-в-1 из исходного index.js. Не менять ключи, API-ключи, baibai URL, порядок массивов.
-
 export const PFX = 'rp-player';
 export const LS_KEY = 'rp_player_pos_v4';
 export const LS_FAB = 'rp_player_fab_v1';

@@ -1,16 +1,15 @@
 import {
   PFX, LS_KEY, LS_FAB, LS_CFG, LS_QUEUE, LS_LIB, LS_RADIO_FAV, LS_RP_REJECTED, LS_SIZE,
-  DEFAULT_JAMENDO_KEY, DEFAULT_YT_KEY, BAIBAI_JS, ALL_LS_KEYS, THEMES, FAV_CHAT_KEY,
+  DEFAULT_JAMENDO_KEY, DEFAULT_YT_KEY, BAIBAI_JS, ALL_LS_KEYS, THEMES,
   SOMA_STATIONS, RADIO_CHIPS, RP_LANGS, RP_GENRES, SWATCHES, TEXT_SWATCHES,
   MODE_LONG_PRESS_MS, MODE_SWITCH_COOLDOWN_MS, MODE_MOVE_CANCEL_PX
 } from './constants.js';
 import {
   formatTime, dateStamp, extractYtVideo, extractYtList, hasDash, fetchWithCancel,
   fetchTimeout, withTimeout, esc, validHex, normHex, hexToRgb, safeFileName,
-  cleanTrackText, normTrackPart, rpTrackSigFromParts, rpTrackSig, rpTrackHuman
+  cleanTrackText, rpTrackSigFromParts, rpTrackSig, rpTrackHuman
 } from './utils.js';
 import { ICONS } from './icons.js';
-import { CSS } from './css.js';
 
 export function startRpMusicPlayer() {
 (function () {
@@ -25,8 +24,6 @@ export function startRpMusicPlayer() {
     return;
   }
   window.__rpPlayerLock = true;
-
-  // Константы (PFX, LS_*, DEFAULT_*_KEY, BAIBAI_JS, ALL_LS_KEYS, THEMES) импортированы из ./constants.js
 
   let theme = 'default';
   try {
@@ -3621,19 +3618,6 @@ export function startRpMusicPlayer() {
     return document.body;
   }
 
-  function injectStyles() {
-    const st = document.createElement('style');
-    st.id = PFX + '-css';
-    st.textContent = CSS;
-    const sid = scriptId();
-    if ($j && sid) {
-      const wrap = $j('<div>').attr('script_id', sid).append(st);
-      $j('head').append(wrap);
-    } else {
-      (document.head || document.documentElement).appendChild(st);
-    }
-  }
-
   function placeholderText() {
     if (cfg.source === 'ytlink') return 'Ссылка YouTube (трек/плейлист)';
     return 'Имя (топ) или Имя — Трек';
@@ -5519,7 +5503,6 @@ export function startRpMusicPlayer() {
     try {
       $j = jq();
       cleanupAll();
-      injectStyles();
       loadQueue();
 
       const mount = getMount();

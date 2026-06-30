@@ -1,6 +1,3 @@
-// RP Music Player — pure utils (zero-loss modular split)
-// Чистые функции, перенесённые 1-в-1 из исходного index.js. Реализация/regex/форматирование не менялись.
-
 export function formatTime(secs) {
   if (isNaN(secs) || secs === Infinity) return '0:00';
   const m = Math.floor(secs / 60);
