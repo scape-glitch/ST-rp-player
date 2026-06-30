@@ -17,9 +17,6 @@ import { createStorage } from './storage.js';
 import { createLibrary } from './library.js';
 
 export function startRpMusicPlayer() {
-(function () {
-  'use strict';
-
 
   if (window.__rpPlayerLock) {
     try {
@@ -5185,5 +5182,4 @@ export function startRpMusicPlayer() {
   } else {
     start();
   }
-})();
 }
