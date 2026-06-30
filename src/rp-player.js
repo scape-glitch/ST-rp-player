@@ -12,6 +12,7 @@ import {
 import { ICONS } from './icons.js';
 import { createPlayerStreams } from './player-streams.js';
 import { createSources } from './sources.js';
+import { createRadio } from './radio.js';
 
 export function startRpMusicPlayer() {
 (function () {
@@ -798,6 +799,25 @@ export function startRpMusicPlayer() {
     try { localStorage.setItem(LS_RADIO_FAV, JSON.stringify(radioFav)); } catch (_) {}
   }
 
+  const radio = createRadio({
+    getRadioFav: function () { return radioFav; },
+    setRadioFav: function (next) { radioFav = next; },
+    saveRadioFav: saveRadioFav,
+    setRadioResults: function (next) { radioResults = next; },
+    setStatusMsg: function (next) { statusMsg = next; },
+    render: render,
+    fetchTimeout: fetchTimeout,
+    SOMA_STATIONS: SOMA_STATIONS,
+    dbg: dbg,
+    warn: warn
+  });
+  const loadMoreSomaStations = radio.loadMoreSomaStations;
+  const searchRadioBrowser = radio.searchRadioBrowser;
+  const isRadioFav = radio.isRadioFav;
+  const toggleRadioFav = radio.toggleRadioFav;
+  const isSomaLoading = radio.isSomaLoading;
+  const isSomaLoadedFromApi = radio.isSomaLoadedFromApi;
+
   let rpRejected = {};
   try {
     const r = JSON.parse(localStorage.getItem(LS_RP_REJECTED) || '{}');
@@ -806,20 +826,6 @@ export function startRpMusicPlayer() {
 
   function saveRpRejected() {
     try { localStorage.setItem(LS_RP_REJECTED, JSON.stringify(rpRejected)); } catch (_) {}
-  }
-
-  function isRadioFav(url) {
-    return radioFav.some(function (s) { return s.url === url; });
-  }
-
-  function toggleRadioFav(station) {
-    if (isRadioFav(station.url)) {
-      radioFav = radioFav.filter(function (s) { return s.url !== station.url; });
-    } else {
-      radioFav.push({ name: station.name, url: station.url, tag: station.tag || '' });
-    }
-    saveRadioFav();
-    render();
   }
 
   function trackSigForFav(t) {
@@ -894,61 +900,6 @@ export function startRpMusicPlayer() {
       dbg('dislike', 'global dislike recorded', rpTrackHuman(track));
     }
   }
-  let somaLoading = false;
-  let somaLoadedFromApi = false;
-
-  async function loadMoreSomaStations() {
-    if (somaLoading) return;
-    somaLoading = true;
-    statusMsg = 'Загружаю станции SomaFM…';
-    render();
-
-    try {
-      const res = await fetchTimeout('https://somafm.com/channels.json', 6000);
-      if (!res.ok) throw new Error('soma_http');
-      const data = await res.json();
-      const chans = data && Array.isArray(data.channels) ? data.channels : [];
-      let added = 0;
-
-      chans.forEach(function (ch) {
-        const pls = Array.isArray(ch.playlists) ? ch.playlists : [];
-        let url = '';
-        const mp3 = pls.find(function (p) {
-          return p && p.format === 'mp3' && p.url && /128|highest|mp3/i.test(String(p.url));
-        }) || pls.find(function (p) {
-          return p && p.format === 'mp3' && p.url;
-        });
-
-        if (mp3 && mp3.url) url = mp3.url;
-        if (!url && ch.id) url = 'https://ice1.somafm.com/' + ch.id + '-128-mp3';
-        if (!url) return;
-
-        const exists = SOMA_STATIONS.some(function (s) {
-          return s.url === url || String(s.name).toLowerCase() === String(ch.title || ch.id).toLowerCase();
-        });
-
-        if (!exists) {
-          SOMA_STATIONS.push({
-            name: ch.title || ch.id || 'SomaFM',
-            url: url,
-            tag: String(ch.genre || ch.description || '').replace(/\s+/g, ' ').slice(0, 80)
-          });
-          added++;
-        }
-      });
-
-      somaLoadedFromApi = true;
-      statusMsg = added ? ('Добавлено станций: ' + added) : 'Все станции SomaFM уже загружены';
-      dbg('soma', 'loaded', added, 'new stations');
-    } catch (e) {
-      statusMsg = 'Не удалось загрузить SomaFM';
-      warn('soma load fail', e);
-    }
-
-    somaLoading = false;
-    render();
-  }
-
   function isMemeGenre() {
     return cfg.rpGenre === 'meme';
   }
@@ -1177,41 +1128,6 @@ export function startRpMusicPlayer() {
     });
 
     window.__rpRadioNow = station;
-    render();
-  }
-
-  async function searchRadioBrowser(q) {
-    statusMsg = 'Поиск радио…';
-    radioResults = [];
-    render();
-    try {
-      const base = 'https://de1.api.radio-browser.info/json/stations/search';
-      let res, data;
-      try {
-        res = await fetch(base + '?limit=20&hidebroken=true&order=clickcount&reverse=true&tag=' + encodeURIComponent(q));
-        data = await res.json();
-      } catch (_) {
-        data = [];
-      }
-      if (!data || !data.length) {
-        res = await fetch(base + '?limit=20&hidebroken=true&order=clickcount&reverse=true&name=' + encodeURIComponent(q));
-        data = await res.json();
-      }
-      radioResults = (data || []).filter(function (s) {
-        return s.url_resolved;
-      }).slice(0, 18).map(function (s) {
-        return {
-          name: s.name || 'станция',
-          url: s.url_resolved,
-          tag: (s.country || '') + (s.tags ? ' · ' + String(s.tags).split(',').slice(0, 2).join(',') : '')
-        };
-      });
-      statusMsg = radioResults.length ? '' : 'Ничего не найдено';
-      dbg('radio', 'browser search', q, '->', radioResults.length);
-    } catch (e) {
-      statusMsg = 'Ошибка поиска радио';
-      warn('radio browser fail', e);
-    }
     render();
   }
 
@@ -3647,7 +3563,7 @@ export function startRpMusicPlayer() {
       h += '<div class="' + PFX + '-sec" data-scrollsec="radio">';
       SOMA_STATIONS.forEach(function (s) { h += stationRow(s); });
       h += '<div class="' + PFX + '-more" data-somamore>' +
-        (somaLoading ? '<span class="' + PFX + '-spin"></span>Загружаю…' : ICONS.search + (somaLoadedFromApi ? 'Обновить список SomaFM' : 'Загрузить ещё станции SomaFM')) +
+        (isSomaLoading() ? '<span class="' + PFX + '-spin"></span>Загружаю…' : ICONS.search + (isSomaLoadedFromApi() ? 'Обновить список SomaFM' : 'Загрузить ещё станции SomaFM')) +
       '</div>';
       h += '</div>';
     } else if (radioTab === 'browser') {
