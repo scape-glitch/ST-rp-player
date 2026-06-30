@@ -1,9 +1,11 @@
 {
-    "name": "ST-rp-player",
-    "display_name": "RP Music Player",
-    "version": "1.0.2",
-    "description": "Удобный виджет плеера с автоподбором музыки для ролеплеев.",
-    "author": "s.cape",
-    "js": ["index.js"],
-    "css": ["style.css"]
+  "name": "ST-rp-player",
+  "display_name": "RP Music Player",
+  "version": "1.0.2",
+  "description": "Music player widget for SillyTavern with RP-aware music suggestions, playlists, radio, and multiple music sources.",
+  "author": "s.cape",
+  "js": "index.js",
+  "css": "style.css",
+  "homePage": "https://github.com/scape-glitch/ST-rp-player",
+  "auto_update": true
 }
