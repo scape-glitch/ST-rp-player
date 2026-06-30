@@ -1,119 +1,136 @@
-# 🎵 SillyTavern RP Music Player
-*Woooow! Player! Radio! RP functions! Peak!* 🎧✨
+# SillyTavern RP Music Player
 
-*[🇷🇺 Переключение на русский язык ниже (Russian version below)](#-русская-версия)*
+RP Music Player is a third-party SillyTavern extension that adds a floating music widget for roleplay sessions. It can search and play music from several sources, manage queues and playlists, save favorites, play radio stations, and suggest tracks based on the current RP scene.
 
----
+RP Music Player — стороннее расширение для SillyTavern с плавающим музыкальным виджетом для ролеплея. Оно умеет искать и воспроизводить музыку из разных источников, управлять очередью и плейлистами, сохранять избранное, включать радио и подбирать треки под текущую RP-сцену.
 
-## 🔑 IMPORTANT: API Keys Guide
-I **highly recommend** creating your own API keys for Jamendo and YouTube to unlock the full potential of this extension without hitting public limits!
+## Features
 
-### 🎧 1. Jamendo — Client ID
-**Why?** Free music search (indie, electronic, ambient, etc.).
+- Music widget for SillyTavern
+- Pill / panel / fab modes
+- Draggable / resizable widget
+- Themes and appearance settings
+- Queue
+- Favorites
+- Playlists / library
+- Radio
+- YouTube
+- Jamendo
+- baibai
+- ccMixter
+- FMA
+- RP-aware music suggestions
+- Backup/import/export
 
-**Steps to get:**
-1. Go to the [Jamendo Developer Portal](https://devportal.jamendo.com/).
-2. Click **Sign up**, register (email + password), and verify your email.
-3. Log in and go to the **My Applications** (or Apps) tab.
-4. Click **Create new application**.
-5. Fill in the details:
-   - **Name:** anything (e.g., *MyPlayer*)
-   - **Description:** anything (e.g., *music widget*)
-   - **Website / Callback:** you can just use `http://localhost`
-6. Click **Create**.
-7. Copy the **Client ID** (a short string of letters/numbers, NOT the Client Secret).
+## Installation
 
-**Where to paste it:**
-Open the widget ➔ 🔍 **Search** ➔ **Source** tab ➔ Select **Jamendo** ➔ Paste into the **Jamendo Client ID** field.
-> ✅ *Done! The limit is very generous, and the key is free forever.*
+Install it as a third-party SillyTavern extension from this repository:
 
-### ▶️ 2. YouTube — API Key
-**Why?** Search across all of YouTube (mainstream music, anything you want). Use wisely — it has a daily quota.
+```text
+https://github.com/scape-glitch/ST-rp-player
+```
 
-**Steps to get:**
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
-2. Log into your Google account *(using a secondary/alt account is recommended)*.
-3. Click the project dropdown at the top ➔ **New Project** ➔ any name ➔ **Create**.
-4. Wait for it to be created, then select this project from the top dropdown.
-5. In the left menu (☰), go to **APIs & Services** ➔ **Library**.
-6. Search for **YouTube Data API v3** ➔ Open it ➔ Click **Enable**.
-7. Go to the left menu again ➔ **APIs & Services** ➔ **Credentials**.
-8. Click **+ Create Credentials** at the top ➔ **API key**.
-9. Copy the generated key (starts with `AIza...`).
+Typical installation flow:
 
-**Where to paste it:**
-Open the widget ➔ 🔍 **Search** ➔ **Source** tab ➔ Select **YouTube API** ➔ Paste into the **YouTube API key** field.
+1. Open SillyTavern.
+2. Go to the Extensions panel.
+3. Use the third-party extension installer.
+4. Paste the repository URL.
+5. Install or update the extension.
+6. Reload SillyTavern if needed.
 
-> ⚠️ **Important YouTube Notes:**
-> - **Quota:** You get roughly ~100 searches per day for free. It's enough for personal RP, but not for spamming.
-> - If you need more, create multiple projects with different keys.
-> - **DO NOT** publish your key publicly (like on GitHub) — Google will detect it and block it.
+Manual installation is also possible by placing the repository folder into SillyTavern's third-party extensions directory and restarting SillyTavern.
 
----
+## Usage
 
-## 💡 Good to know
-**Default keys are already built into the script.** However, because they are shared, their limits might be exhausted quickly. 
-Having your own keys guarantees that everything will work smoothly 24/7 with your personal quota. (Keys aren't strictly necessary for Baibai/ccMixter/FMA, but for active YouTube usage, a personal key is highly recommended).
+After installation, the widget appears inside SillyTavern. It can be used in several modes:
 
----
----
+- **Pill mode**: compact floating player.
+- **Panel mode**: expanded interface with search, radio, RP settings, library, and queue.
+- **Fab mode**: small floating action button.
 
-<a name="-русская-версия"></a>
-## 🇷🇺 Русская версия
+Use the widget to search for tracks, add them to the queue, save favorites, create playlists, play radio, or request RP-aware suggestions from the current chat context.
 
-# 🎵 SillyTavern RP Music Player
-*Woooow! Плеер! Радио! РП функции! Peak!* 🎧✨
+The widget stores its settings and library data locally in the browser through SillyTavern/localStorage.
 
-## 🔑 ВАЖНОЕ ПРО КЛЮЧИ: Гайд
-Настоятельно советую создать свои ключи для Jamendo и YouTube API, чтобы пользоваться возможностями скрипта на максимум и не зависеть от лимитов!
+## API keys
 
-### 🎧 1. Jamendo — Client ID
-**Зачем:** бесплатный поиск музыки (инди, электроника, эмбиент).
+The extension includes default API keys where applicable, but shared keys can hit public limits. For more reliable usage, add your own keys in the widget settings.
 
-**Как получить:**
-1. Зайди на [Jamendo Developer Portal](https://devportal.jamendo.com/).
-2. Нажми **Sign up** → зарегистрируйся (email + пароль) и подтверди почту.
-3. Войди в аккаунт и открой вкладку **My Applications** (или Apps).
-4. Нажми **Create new application**.
-5. Заполни поля:
-   - **Name:** любое (напр., *MyPlayer*)
-   - **Description:** любое (напр., *music widget*)
-   - **Website / Callback:** можно вписать `http://localhost`
-6. Создай приложение. Откроется страница с данными.
-7. Скопируй **Client ID** (строка из букв/цифр, НЕ Client Secret!).
+### Jamendo Client ID
 
-**Куда вставить:**
-Открой виджет ➔ 🔍 **Поиск** ➔ вкладка **«Источник»** ➔ выбери **Jamendo** ➔ вставь в поле **Jamendo Client ID**.
-> ✅ *Готово. Лимит очень щедрый, ключ бесплатный навсегда.*
+1. Open the Jamendo developer portal: <https://devportal.jamendo.com/>
+2. Create an account or sign in.
+3. Create an application.
+4. Copy the Client ID.
+5. Paste it into the Jamendo Client ID field in the widget.
 
-### ▶️ 2. YouTube — API ключ
-**Зачем:** поиск по YouTube (мейнстрим, всё подряд). Трать осознанно — есть дневная квота.
+### YouTube API key
 
-**Как получить:**
-1. Зайди в [Google Cloud Console](https://console.cloud.google.com/).
-2. Войди в Google-аккаунт *(лучше использовать отдельный/твинк, а не основной)*.
-3. Сверху нажми на выпадающее меню проектов ➔ **New Project** ➔ введи любое имя ➔ **Create**.
-4. Дождись создания и выбери этот проект в том же верхнем меню.
-5. В левом меню (☰) перейди в **APIs & Services** ➔ **Library**.
-6. В поиске набери **YouTube Data API v3** ➔ открой ➔ нажми **Enable**.
-7. Снова слева: **APIs & Services** ➔ **Credentials**.
-8. Сверху нажми **+ Create Credentials** ➔ **API key**.
-9. Ключ создан! Скопируй его (это строка, начинающаяся на `AIza...`).
+1. Open Google Cloud Console: <https://console.cloud.google.com/>
+2. Create or select a project.
+3. Enable YouTube Data API v3.
+4. Create an API key.
+5. Paste it into the YouTube API key field in the widget.
 
-**Куда вставить:**
-Открой виджет ➔ 🔍 **Поиск** ➔ вкладка **«Источник»** ➔ выбери **YouTube API** ➔ вставь в поле **YouTube API ключ**.
+Keep personal API keys private and avoid publishing them in public repositories.
 
-> ⚠️ **Важно про YouTube:**
-> - **Квота:** примерно ~100 поисков в день бесплатно. Хватит для РП, но не для спама.
-> - Если жжёшь много — заведи несколько твинк-проектов с разными ключами.
-> - **НЕ ПУБЛИКУЙ** ключ в открытом доступе (на GitHub и т.п.) — Google его найдёт и заблокирует.
+## Project structure
 
----
+The extension is partially modularized into styles, constants, utilities, icons, storage, music sources, stream helpers, radio helpers, library helpers, and the main runtime.
 
-## 💡 ПРИЕМ-ПРИЕМ
-Оба поля ЖЕЛАТЕЛЬНЫ, **НО в скрипт уже встроены ключи по умолчанию**. Однако лимиты по ним общие для всех и могут быть исчерпаны. 
+```text
+ST-rp-player/
+├─ index.js              Extension entry point
+├─ manifest.json         SillyTavern extension manifest
+├─ style.css             Runtime widget styles
+├─ index.html            GitHub preview landing page
+├─ README.md             Project documentation
+├─ LICENSE.txt           License file
+└─ src/
+   ├─ constants.js       Constants and default values
+   ├─ icons.js           Inline SVG icons
+   ├─ utils.js           Shared utility helpers
+   ├─ storage.js         Local storage helpers
+   ├─ sources.js         Music source integrations
+   ├─ player-streams.js  Stream resolution helpers
+   ├─ radio.js           Radio helpers
+   ├─ library.js         Library, favorites, and playlist helpers
+   └─ rp-player.js       Main widget runtime
+```
 
-Свои ключи нужны, чтобы всё точно работало в любое время, и у вас была своя личная квота. Для Jamendo, Baibai, ccMixter и FMA ключи не так критичны, но для активного использования YouTube — крайне желательно иметь свой!
+## Troubleshooting
 
----
-*by s.cape*
+### The widget does not appear
+
+- Make sure the extension is installed and enabled in SillyTavern.
+- Reload SillyTavern after installation or update.
+- Check the browser console for extension loading errors.
+
+### Search returns few or no results
+
+- Try another source in the widget source settings.
+- Add your own Jamendo Client ID or YouTube API key.
+- Check whether the selected source has public rate limits or availability issues.
+
+### YouTube playback is unreliable
+
+YouTube availability can depend on embeds, API quotas, stream extraction, and regional restrictions. If a track fails, try another result or another music source.
+
+### RP-aware suggestions do not work
+
+- Make sure SillyTavern has an active chat context.
+- Check the selected connection profile in the RP settings.
+- Verify that your model/provider can respond to the prompt.
+
+### Settings or playlists are missing
+
+The extension stores data locally in the browser. Browser profile changes, site data cleanup, private mode, or a different SillyTavern URL can affect stored data. Use backup/import/export to preserve important data.
+
+## Security note for third-party extensions
+
+Third-party SillyTavern extensions run inside your SillyTavern browser session and can interact with the page. Install extensions only from sources you trust, review code before use when possible, and keep private API keys secure.
+
+## License
+
+See [LICENSE.txt](LICENSE.txt).

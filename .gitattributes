@@ -1,0 +1,5 @@
+*.js linguist-language=JavaScript
+*.css linguist-language=CSS -linguist-generated -linguist-vendored linguist-detectable
+*.html linguist-language=HTML -linguist-generated -linguist-vendored linguist-detectable
+*.md linguist-documentation
+LICENSE.txt linguist-documentation
