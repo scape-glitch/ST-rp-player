@@ -13,6 +13,7 @@ import { ICONS } from './icons.js';
 import { createPlayerStreams } from './player-streams.js';
 import { createSources } from './sources.js';
 import { createRadio } from './radio.js';
+import { createStorage } from './storage.js';
 
 export function startRpMusicPlayer() {
 (function () {
@@ -46,6 +47,21 @@ export function startRpMusicPlayer() {
   function error(...args) { console.error('[ST Player]', ...args); }
   function dbg(tag, ...args) { if (DEBUG) console.log('[ST Player][' + tag + ']', ...args); }
 
+  const storage = createStorage({
+    localStorage: localStorage,
+    keys: {
+      LS_CFG: LS_CFG,
+      LS_SIZE: LS_SIZE,
+      LS_KEY: LS_KEY,
+      LS_FAB: LS_FAB,
+      LS_LIB: LS_LIB,
+      LS_RADIO_FAV: LS_RADIO_FAV,
+      LS_RP_REJECTED: LS_RP_REJECTED,
+      LS_QUEUE: LS_QUEUE
+    },
+    warn: warn
+  });
+
   const playerStreams = createPlayerStreams({ fetchTimeout: fetchTimeout, dbg: dbg, warn: warn });
   const getTrackAudioStream = playerStreams.getTrackAudioStream;
   const getCachedInvidious = playerStreams.getCachedInvidious;
@@ -60,7 +76,7 @@ export function startRpMusicPlayer() {
     textColor: '', textColorByTheme: {}, solidByTheme: {},
     solidLightByTheme: {}, accentByTheme: {}, debug: true
   };
-  try { cfg = Object.assign(cfg, JSON.parse(localStorage.getItem(LS_CFG) || '{}')); } catch (_) {}
+  cfg = storage.loadConfig(cfg);
   if (!cfg.bgByTheme || typeof cfg.bgByTheme !== 'object') cfg.bgByTheme = {};
   if (!cfg.textColorByTheme || typeof cfg.textColorByTheme !== 'object') cfg.textColorByTheme = {};
   if (!cfg.solidByTheme || typeof cfg.solidByTheme !== 'object') cfg.solidByTheme = {};
@@ -79,7 +95,7 @@ export function startRpMusicPlayer() {
   let bgPending = null;
 
   function saveCfg() {
-    try { localStorage.setItem(LS_CFG, JSON.stringify(cfg)); } catch (e) { warn('saveCfg fail', e); }
+    storage.saveConfig(cfg);
   }
   function jamKey() {
     return (cfg.jamendoKey || '').trim() || DEFAULT_JAMENDO_KEY;
@@ -122,11 +138,7 @@ export function startRpMusicPlayer() {
     }
   })();
 
-  try {
-    ['rp_player_state_v1', 'rp_player_pos_v2', 'rp_player_pos_v3', 'liquidGlassPosition'].forEach(function (k) {
-      localStorage.removeItem(k);
-    });
-  } catch (_) {}
+  storage.removeLegacyPositionKeys();
 
   let uiMode = 'pill';
   let searchOpen = false, libOpen = false, radioOpen = false, rpOpen = false, plOpen = false, radioTab = 'soma';
@@ -188,7 +200,7 @@ export function startRpMusicPlayer() {
   syncCollapsed();
   (function () {
     try {
-      const s = JSON.parse(localStorage.getItem(LS_SIZE) || '{}');
+      const s = storage.loadSizeState();
       if (typeof s.collapsedW === 'number') sizeCollapsedW = s.collapsedW;
       if (typeof s.collapsedH === 'number') sizeCollapsedH = s.collapsedH;
       if (typeof s.expandedW === 'number') sizeExpandedW = s.expandedW;
@@ -212,20 +224,20 @@ export function startRpMusicPlayer() {
         sizeExpandedW = userW || sizeExpandedW;
         sizeExpandedH = userH || sizeExpandedH;
       }
-      localStorage.setItem(LS_SIZE, JSON.stringify({
+      storage.saveJson(LS_SIZE, {
         collapsedW: sizeCollapsedW,
         collapsedH: sizeCollapsedH,
         expandedW: sizeExpandedW,
         expandedH: sizeExpandedH,
         fabW: sizeFabW,
         fabH: sizeFabH
-      }));
+      }, 'saveSize fail');
     } catch (e) { warn('saveSize fail', e); }
   }
 
   (function () {
     try {
-      const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+      const s = storage.loadPositionState();
       if (typeof s.uiMode === 'string') {
         uiMode = s.uiMode;
       } else if (typeof s.collapsed === 'boolean') {
@@ -240,7 +252,7 @@ export function startRpMusicPlayer() {
       if (typeof s.y === 'number' && posExpandedY === -1) posExpandedY = s.y;
     } catch (e) {}
     try {
-      const f = JSON.parse(localStorage.getItem(LS_FAB) || '{}');
+      const f = storage.loadFabPositionState();
       if (typeof f.x === 'number') posFabX = f.x;
       if (typeof f.y === 'number') posFabY = f.y;
     } catch (e) {}
@@ -275,7 +287,7 @@ export function startRpMusicPlayer() {
     try {
       syncCollapsed();
 
-      localStorage.setItem(LS_KEY, JSON.stringify({
+      storage.savePositionState({
         uiMode: uiMode,
         collapsed: collapsed,
 
@@ -284,12 +296,12 @@ export function startRpMusicPlayer() {
 
         expandedX: posExpandedX,
         expandedY: posExpandedY
-      }));
+      });
 
-      localStorage.setItem(LS_FAB, JSON.stringify({
+      storage.saveFabPositionState({
         x: posFabX,
         y: posFabY
-      }));
+      });
     } catch (e) {
       warn('persistPosOnly fail', e);
     }
@@ -782,21 +794,13 @@ export function startRpMusicPlayer() {
   let resultsRp = false;
   let searchState = { query: '', scope: 'all', srcIdx: 0, offsets: {}, ytTokens: {}, exhausted: false };
 
-  let lib = { manual: [], rp: {}, favorites: [] };
-  try { lib = Object.assign({ manual: [], rp: {}, favorites: [] }, JSON.parse(localStorage.getItem(LS_LIB) || '{}')); } catch (_) {}
-  if (!Array.isArray(lib.manual)) lib.manual = [];
-  if (!lib.rp || typeof lib.rp !== 'object') lib.rp = {};
-  if (!Array.isArray(lib.favorites)) lib.favorites = [];
+  let lib = storage.loadLibrary();
   function saveLib() {
-    try { localStorage.setItem(LS_LIB, JSON.stringify(lib)); } catch (e) { warn('saveLib fail', e); }
+    storage.saveLibrary(lib);
   }
-  let radioFav = [];
-  try {
-    const a = JSON.parse(localStorage.getItem(LS_RADIO_FAV) || '[]');
-    if (Array.isArray(a)) radioFav = a;
-  } catch (_) {}
+  let radioFav = storage.loadRadioFavorites();
   function saveRadioFav() {
-    try { localStorage.setItem(LS_RADIO_FAV, JSON.stringify(radioFav)); } catch (_) {}
+    storage.saveRadioFavorites(radioFav);
   }
 
   const radio = createRadio({
@@ -818,14 +822,10 @@ export function startRpMusicPlayer() {
   const isSomaLoading = radio.isSomaLoading;
   const isSomaLoadedFromApi = radio.isSomaLoadedFromApi;
 
-  let rpRejected = {};
-  try {
-    const r = JSON.parse(localStorage.getItem(LS_RP_REJECTED) || '{}');
-    if (r && typeof r === 'object') rpRejected = r;
-  } catch (_) {}
+  let rpRejected = storage.loadRpRejected();
 
   function saveRpRejected() {
-    try { localStorage.setItem(LS_RP_REJECTED, JSON.stringify(rpRejected)); } catch (_) {}
+    storage.saveRpRejected(rpRejected);
   }
 
   function trackSigForFav(t) {
@@ -1132,12 +1132,12 @@ export function startRpMusicPlayer() {
   }
 
   function saveQueue() {
-    try { localStorage.setItem(LS_QUEUE, JSON.stringify({ queue: queue, curIdx: curIdx })); } catch (_) {}
+    storage.saveQueueState(queue, curIdx);
   }
 
   function loadQueue() {
     try {
-      const s = JSON.parse(localStorage.getItem(LS_QUEUE) || '{}');
+      const s = storage.loadQueueState();
       if (Array.isArray(s.queue)) {
         queue = s.queue;
         curIdx = (typeof s.curIdx === 'number') ? s.curIdx : -1;
